@@ -1,3 +1,5 @@
+import pdb
+
 is_torchvision_installed = True
 try:
     import torchvision
@@ -10,7 +12,23 @@ import torch.utils.data
 import random
 import numpy as np
 
+import torch
+from torch.utils.data import DataLoader
+import torch.nn as nn
+import tqdm
+
+
 from torch.utils.data.sampler import BatchSampler
+import torch
+import matplotlib
+
+matplotlib.use('Agg')
+from sklearn.manifold import TSNE
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as col
+
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -95,3 +113,90 @@ class InfiniteSliceIterator:
         i = self.i
         self.i += n
         return self.array[i : self.i]
+
+def accuracy(output, target, topk=(1,)):
+    r"""
+    Computes the accuracy over the k top predictions for the specified values of k
+
+    Args:
+        output (tensor): Classification outputs, :math:`(N, C)` where `C = number of classes`
+        target (tensor): :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`
+        topk (sequence[int]): A list of top-N number.
+
+    Returns:
+        Top-N accuracies (N :math:`\in` topK).
+    """
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target[None])
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].flatten().sum(dtype=torch.float32)
+            res.append(correct_k * (100.0 / batch_size))
+        return res
+
+
+
+def collect_feature(data_loader: DataLoader, feature_extractor: nn.Module,
+                                   device: torch.device, max_num_features=None) -> torch.Tensor:
+    """
+    Fetch data from `data_loader`, and then use `feature_extractor` to collect features
+
+    Args:
+        data_loader (torch.utils.data.DataLoader): Data loader.
+        feature_extractor (torch.nn.Module): A feature extractor.
+        device (torch.device)
+        max_num_features (int): The max number of features to return
+
+    Returns:
+        Features in shape (min(len(data_loader), max_num_features), :math:`|\mathcal{F}|`).
+    """
+    feature_extractor.eval()
+    all_features = []
+    with torch.no_grad():
+        for i, (images, target) in enumerate(tqdm.tqdm(data_loader)):
+            images = images.to(device)
+            feature = feature_extractor(images).cpu()
+            # Fea = feature_extractor(images)
+            # F = Fea.view(Fea.shape[0], -1)
+            # feature = bottleneck(F).cpu()
+            # pdb.set_trace()
+            all_features.append(feature)
+            if max_num_features is not None and i >= max_num_features:
+                break
+    return torch.cat(all_features, dim=0)
+
+
+def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
+              filename: str, source_color='r', target_color='b'):
+    """
+    Visualize features from different domains using t-SNE.
+
+    Args:
+        source_feature (tensor): features from source domain in shape :math:`(minibatch, F)`
+        target_feature (tensor): features from target domain in shape :math:`(minibatch, F)`
+        filename (str): the file name to save t-SNE
+        source_color (str): the color of the source features. Default: 'r'
+        target_color (str): the color of the target features. Default: 'b'
+
+    """
+    source_feature = source_feature.numpy()
+    target_feature = target_feature.numpy()
+    features = np.concatenate([source_feature, target_feature], axis=0)
+
+    # map features to 2-d using TSNE
+    X_tsne = TSNE(n_components=2, random_state=33).fit_transform(features)
+
+    # domain labels, 1 represents source while 0 represents target
+    domains = np.concatenate((np.ones(len(source_feature)), np.zeros(len(target_feature))))
+
+    # visualize using matplotlib
+    plt.figure(figsize=(10, 10))
+    plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=domains, cmap=col.ListedColormap([target_color, source_color]), s=3, alpha=0.3)
+    plt.savefig(filename)
+

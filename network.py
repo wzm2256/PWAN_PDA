@@ -65,6 +65,7 @@ class ResNetFc(nn.Module):
 
   def forward(self, x):
     x = self.feature_layers(x)
+    # pdb.set_trace()
     x = x.view(x.size(0), -1)
     if self.use_bottleneck and self.new_cls:
         x = self.bottleneck(x)
