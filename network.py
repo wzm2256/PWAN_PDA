@@ -31,7 +31,7 @@ def grl_hook(coeff):
     return fun1
 
 class ResNetFc(nn.Module):
-  def __init__(self, resnet_name, use_bottleneck=True, bottleneck_dim=256, new_cls=False, class_num=1000):
+  def __init__(self, resnet_name, use_bottleneck=True, bottleneck_dim=256, new_cls=False, class_num=1000, init_fc=0):
     super(ResNetFc, self).__init__()
     model_resnet = resnet_dict[resnet_name](pretrained=True)
     self.conv1 = model_resnet.conv1
@@ -50,10 +50,14 @@ class ResNetFc(nn.Module):
     self.new_cls = new_cls
     if new_cls:
         if self.use_bottleneck:
-            self.bottleneck = nn.Linear(model_resnet.fc.in_features, bottleneck_dim)
+            self.bottleneck = \
+                nn.Sequential(nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
+                nn.BatchNorm1d(bottleneck_dim),
+                nn.ReLU())
             self.fc = nn.Linear(bottleneck_dim, class_num)
-            self.bottleneck.apply(init_weights)
-            self.fc.apply(init_weights)
+            if init_fc == 1:
+                self.bottleneck.apply(init_weights)
+                self.fc.apply(init_weights)
             self.__in_features = bottleneck_dim
         else:
             self.fc = nn.Linear(model_resnet.fc.in_features, class_num)
@@ -78,9 +82,12 @@ class ResNetFc(nn.Module):
   def get_parameters(self):
     if self.new_cls:
         if self.use_bottleneck:
-            parameter_list = [{"params":self.feature_layers.parameters(), "lr_mult":1, 'decay_mult':2}, \
-                            {"params":self.bottleneck.parameters(), "lr_mult":10, 'decay_mult':2}, \
-                            {"params":self.fc.parameters(), "lr_mult":10, 'decay_mult':2}]
+            # parameter_list = [{"params":self.feature_layers.parameters(), "lr_mult":1, 'decay_mult':2}, \
+            #                 {"params":self.bottleneck.parameters(), "lr_mult":10, 'decay_mult':2}, \
+            #                 {"params":self.fc.parameters(), "lr_mult":10, 'decay_mult':2}]
+            parameter_list = [{"params": self.feature_layers.parameters(), "lr_mult": 0.1, 'decay_mult': 2}, \
+                              {"params": self.bottleneck.parameters(), "lr_mult": 1, 'decay_mult': 2}, \
+                              {"params": self.fc.parameters(), "lr_mult": 1, 'decay_mult': 2}]
         else:
             parameter_list = [{"params":self.feature_layers.parameters(), "lr_mult":1, 'decay_mult':2}, \
                             {"params":self.fc.parameters(), "lr_mult":10, 'decay_mult':2}]

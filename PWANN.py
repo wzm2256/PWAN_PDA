@@ -16,14 +16,27 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 
-def image_train(resize_size=256, crop_size=224):
-    return  transforms.Compose([
-        transforms.Resize((resize_size, resize_size)),
-        transforms.RandomCrop(crop_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+
+def image_train(pre_process=0, resize_size=256, crop_size=224):
+    if pre_process == 0:
+        return transforms.Compose([
+            transforms.Resize((resize_size, resize_size)),
+            transforms.RandomCrop(crop_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif pre_process == 1:
+        return transforms.Compose([
+            transforms.Resize((resize_size, resize_size)),
+            transforms.RandomResizedCrop(crop_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif pre_process == 2:
+        raise ValueError('Not implement yet')
+
 
 def image_test(resize_size=256, crop_size=224):
     return  transforms.Compose([
@@ -64,30 +77,27 @@ def train(args):
     train_bs, test_bs = args.batch_size, args.batch_size * 2
 
     dsets = {}
-    dsets["source"] = data_list.ImageList(open(args.s_dset_path).readlines(), transform=image_train())
-    dsets["target"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_train())
+    dsets["source"] = data_list.ImageList(open(args.s_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
+    dsets["target"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
     dsets["test"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_test())
 
     dset_loaders = {}
-    # dset_loaders["source"] = DataLoader(dsets["source"], batch_size=train_bs, shuffle=True, num_workers=args.worker, drop_last=True)
-    
-    source_labels = torch.zeros((len(dsets["source"])))
-
-    for i, data in enumerate(dsets["source"]):
-        source_labels[i] = data[1]
-
-    train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
-    dset_loaders["source"] = DataLoader(dsets["source"],
-                                                         batch_sampler=train_batch_sampler, 
-                                                         num_workers=args.worker)
-    
+    if args.balance == 0:
+        dset_loaders["source"] = DataLoader(dsets["source"], batch_size=train_bs, shuffle=True, num_workers=args.worker,
+                                            prefetch_factor=8, drop_last=True)
+    else:
+        source_labels = torch.tensor([i[1] for i in dsets["source"].imgs])
+        train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
+        dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
+                                            prefetch_factor=8)
+    #########
     dset_loaders["target"] = DataLoader(dsets["target"], batch_size=train_bs, shuffle=True,
                                         num_workers=args.worker, drop_last=True)
     dset_loaders["test"]   = DataLoader(dsets["test"], batch_size=test_bs, shuffle=False,
                                         num_workers=args.worker)
 
     if "ResNet" in args.net:
-        params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num}
+        params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num, 'init_fc':args.init_fc}
         base_network = network.ResNetFc(**params)
     
     if "VGG" in args.net:
@@ -104,6 +114,8 @@ def train(args):
                   leaky=args.d_leaky).to(device)
 
     G_P = Grad_Penalty(100, args.point_mass, gamma=1, device='cuda')
+
+    # pdb.set_trace()
 
     D_Net_parames = [j for (i, j) in domain_D.named_parameters() if i != 'h']
     optimizer_D = optim.RMSprop(D_Net_parames, lr=args.lr_D)
@@ -173,8 +185,16 @@ def train(args):
         xt, yt = iter_target.next()
         xs, xt, ys = xs.cuda(), xt.cuda(), ys.cuda()
 
-        g_xs, f_g_xs = base_network(xs)
-        g_xt, f_g_xt = base_network(xt)
+
+        ######
+        # g_xs, f_g_xs = base_network(xs)
+        # g_xt, f_g_xt = base_network(xt)
+        ######
+        x = torch.cat((xs, xt), dim=0)
+        g, f = base_network(x)
+        g_xs, g_xt = g.chunk(2, dim=0)
+        f_g_xs, f_g_xt = f.chunk(2, dim=0)
+        ######
 
         # pdb.set_trace()
         ###############################################################
@@ -265,8 +285,8 @@ if __name__ == "__main__":
     parser.add_argument('--opt_G', type=int, default=0, help='0: SGD momentum 1:RMSprop 2: SGD 3: RMSProp no schedule')
     parser.add_argument('--entropy', type=float, default=0., help='entropy weight')
     parser.add_argument('--entropy_s', type=float, default=0., help='entropy weight')
-
-
+    parser.add_argument('--pre_process', type=int, default=0, help='')
+    parser.add_argument('--init_fc', type=int, default=0, help='')
 
     args = parser.parse_args()
 
@@ -275,7 +295,10 @@ if __name__ == "__main__":
         k = 25
         args.class_num = 65
         args.test_interval = 500
-        
+        if args.batch_size == 65:
+            args.balance = 1
+        else:
+            args.balance = 0
 
     if args.dset == 'office':
         names = ['amazon', 'dslr', 'webcam']
@@ -308,10 +331,11 @@ if __name__ == "__main__":
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
 
-    setting_name = 'h_{}_N_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}'.format(args.d_hidden, args.d_norm, args.trade_off,
+    setting_name = 'h_{}_N_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}_init{}'.format(args.d_hidden, args.d_norm, args.trade_off,
                                                                          args.lr_D, args.lr, args.d_weight_label,
                                                                          args.d_iter, args.point_mass, args.cls_weight,
-                                                                         args.opt_G, args.entropy, args.entropy_s, args.batch_size)
+                                                                         args.opt_G, args.entropy, args.entropy_s, args.batch_size,
+                                                                        args.pre_process, args.init_fc)
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)
     if not os.path.isdir(args.Log_path):
