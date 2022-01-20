@@ -84,17 +84,23 @@ def train(args):
     dset_loaders = {}
     if args.balance == 0:
         dset_loaders["source"] = DataLoader(dsets["source"], batch_size=train_bs, shuffle=True, num_workers=args.worker,
-                                            prefetch_factor=8, drop_last=True)
+                                            prefetch_factor=8,
+                                            drop_last=True)
     else:
         source_labels = torch.tensor([i[1] for i in dsets["source"].imgs])
         train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
         dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
-                                            prefetch_factor=8)
+                                            prefetch_factor=8
+                                            )
     #########
     dset_loaders["target"] = DataLoader(dsets["target"], batch_size=train_bs, shuffle=True,
-                                        num_workers=args.worker, drop_last=True)
+                                        num_workers=args.worker, drop_last=True,
+                                        prefetch_factor=8
+                                        )
     dset_loaders["test"]   = DataLoader(dsets["test"], batch_size=test_bs, shuffle=False,
-                                        num_workers=args.worker)
+                                        num_workers=args.worker,
+                                        prefetch_factor=8
+                                        )
 
     if "ResNet" in args.net:
         params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num, 'init_fc':args.init_fc}
@@ -113,7 +119,7 @@ def train(args):
     domain_D = D2(in_feature=256 + args.class_num, hidden_size=args.d_hidden, norm_I=args.d_norm,
                   leaky=args.d_leaky).to(device)
 
-    G_P = Grad_Penalty(100, args.point_mass, gamma=1, device='cuda')
+    G_P = Grad_Penalty(100, gamma=1, device='cuda')
 
     # pdb.set_trace()
 
@@ -149,10 +155,7 @@ def train(args):
     schedule_param = optimizer_config["lr_param"]
     lr_scheduler = lr_schedule.schedule_dict[optimizer_config["lr_type"]]
 
-    # pdb.set_trace()
     feature_extractor = nn.Sequential(base_network.module.feature_layers, nn.Flatten(), base_network.module.bottleneck).to('cuda')
-    # Feature_Layer = base_network.module.feature_layers.to('cuda')
-    # Bottleneck = base_network.module.bottleneck.to('cuda')
     for i in range(args.max_iterations + 1):
 
         if (i % args.test_interval == 0 and i > 0) or (i == args.max_iterations):
@@ -209,7 +212,7 @@ def train(args):
         for d in range(args.d_iter):
             potential_r = domain_D(cor_s_d)
             potential_f = domain_D(cor_t_d)
-            d_loss = cal_dloss(potential_r, potential_f, args.point_mass)
+            d_loss = cal_dloss(potential_r, potential_f, args.point_mass * args.q ** i)
 
             if d == 0:
                 gp_loss, M = G_P(d_loss, [cor_s_d, cor_t_d])
@@ -232,7 +235,7 @@ def train(args):
 
         potential_r_g = domain_D(cor_s_g)
         potential_f_g = domain_D(cor_t_g)
-        transfer_loss = -cal_dloss(potential_r_g, potential_f_g, args.point_mass)
+        transfer_loss = -cal_dloss(potential_r_g, potential_f_g, args.point_mass * args.q ** i)
 
         #########################################################################
         # transfer_loss = torch.tensor(0.)
@@ -288,6 +291,8 @@ if __name__ == "__main__":
     parser.add_argument('--pre_process', type=int, default=0, help='')
     parser.add_argument('--init_fc', type=int, default=0, help='')
 
+    parser.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
+
     args = parser.parse_args()
 
     if args.dset == 'office_home':
@@ -331,11 +336,12 @@ if __name__ == "__main__":
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
 
-    setting_name = 'h_{}_N_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}_init{}'.format(args.d_hidden, args.d_norm, args.trade_off,
-                                                                         args.lr_D, args.lr, args.d_weight_label,
-                                                                         args.d_iter, args.point_mass, args.cls_weight,
-                                                                         args.opt_G, args.entropy, args.entropy_s, args.batch_size,
-                                                                        args.pre_process, args.init_fc)
+    setting_name = 'h_{}_N_{}_ly_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}' \
+                   '_init{}_r_{}'.format(
+                    args.d_hidden, args.d_norm, args.d_leaky, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
+                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy, args.entropy_s,
+                    args.batch_size, args.pre_process, args.init_fc, args.pm_ratio)
+
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)
     if not os.path.isdir(args.Log_path):
@@ -353,5 +359,7 @@ if __name__ == "__main__":
 
     tf_log = os.path.join(args.Log_path, '0', 'LOG')
     args.writer = SummaryWriter(tf_log)
+
+    args.q = np.exp(np.log(args.pm_ratio) / args.max_iterations)
 
     train(args)

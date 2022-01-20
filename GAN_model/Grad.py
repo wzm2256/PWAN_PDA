@@ -5,11 +5,11 @@ import pdb
 
 class Grad_Penalty:
 
-	def __init__(self, lambdaGP, point_mass, gamma=1, device=torch.device('cpu'), ):
+	def __init__(self, lambdaGP, gamma=1, device=torch.device('cpu'), ):
 		self.lambdaGP = lambdaGP
 		self.gamma = gamma
 		self.device = device
-		self.point_mass = point_mass
+		# self.point_mass = point_mass
 
 	def __call__(self, loss, All_points):
 
