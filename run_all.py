@@ -8,6 +8,7 @@ import prepare_data
 args_ps = argparse.ArgumentParser()
 
 
+args_ps.add_argument('--dset', default='office_home', type=str)
 args_ps.add_argument('--trade_off', default=0.1, type=float)
 args_ps.add_argument('--d_hidden', default=256, type=int)
 args_ps.add_argument('--d_norm', default=0, type=int)
@@ -19,6 +20,7 @@ args_ps.add_argument('--d_iter', type=int, default=3)
 args_ps.add_argument('--point_mass', type=float, default=0.25)
 args_ps.add_argument('--cls_weight', type=float, default=1.)
 args_ps.add_argument('--opt_G', type=int, default=3, help='0: SGD momentum 1:RMSprop 2: SGD ')
+args_ps.add_argument('--opt_D', type=int, default=0, help='0: SGD momentum 1:RMSprop 2: SGD ')
 args_ps.add_argument('--entropy', type=float, default=0.1, help='entropy weight')
 args_ps.add_argument('--entropy_s', type=float, default=0., help='entropy weight')
 args_ps.add_argument('--batch_size', type=int, default=36)
@@ -26,8 +28,9 @@ args_ps.add_argument('--worker', type=int, default=8, help="number of workers")
 args_ps.add_argument('--pre_process', type=int, default=0, help='')
 args_ps.add_argument('--init_fc', type=int, default=0, help='')
 args_ps.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
+args_ps.add_argument('--max_iterations', type=int, default=5000, help="max iterations")
 
-args_ps.add_argument('--task_list', default='0,1', type=str)
+args_ps.add_argument('--task_list', default='0', type=str)
 
 args = args_ps.parse_args()
 
@@ -39,7 +42,7 @@ def run(repeat_time, ex_str, ex_value):
 		Setting += ' '
 		Setting += str(ex_value[l])
 
-	Default_cmd ='python PWANN.py --dset office_home --net ResNet50 '
+	Default_cmd ='python PWANN.py   --net ResNet50 '
 	cmd = Default_cmd + Setting
 
 	print(cmd)
@@ -69,13 +72,13 @@ prepare_data.OfficeHome(root='data/office_home/images/')
 
 for task in task_list:
 	st = ST[task]
-	run(1, ['--s', '--t', '--max_iterations', '--batch_size', '--worker', '--d_leaky',
+	run(1, ['--dset', '--s', '--t', '--max_iterations', '--batch_size', '--worker', '--d_leaky',
 	                         '--point_mass', '--trade_off', '--d_iter', '--d_norm',
 	                         '--d_hidden', '--lr_D', '--d_weight_label', '--cls_weight', 
 	                         '--opt_G', '--entropy', '--entropy_s', '--lr',
-	                        '--pre_process', '--init_fc', '--pm_ratio'],
-		[ st[0], st[1], '10000', args.batch_size, args.worker, args.d_leaky,
+	                        '--pre_process', '--init_fc', '--pm_ratio', '--opt_D'],
+		[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
 		 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
 		 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight, 
 		 args.opt_G, args.entropy, args.entropy_s, args.lr_G,
-		  args.pre_process, args.init_fc, args.pm_ratio])
+		  args.pre_process, args.init_fc, args.pm_ratio, args.opt_D])

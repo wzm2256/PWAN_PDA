@@ -15,7 +15,10 @@ from GAN_model.util import cal_dloss, Concate_w, Entropy
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
-
+import datasets.partial as datasets
+from datasets.partial import default_partial as partial_dataset
+from torch.optim.lr_scheduler import LambdaLR
+import torch.backends.cudnn as cudnn
 
 def image_train(pre_process=0, resize_size=256, crop_size=224):
     if pre_process == 0:
@@ -35,6 +38,20 @@ def image_train(pre_process=0, resize_size=256, crop_size=224):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
     elif pre_process == 2:
+        return transforms.Compose([
+            transforms.Resize((resize_size, resize_size)),
+            transforms.RandomCrop(crop_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif pre_process == 3:
+        return transforms.Compose([
+            transforms.Resize((resize_size, resize_size)),
+            transforms.CenterCrop(crop_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    else:
         raise ValueError('Not implement yet')
 
 
@@ -77,9 +94,18 @@ def train(args):
     train_bs, test_bs = args.batch_size, args.batch_size * 2
 
     dsets = {}
-    dsets["source"] = data_list.ImageList(open(args.s_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
-    dsets["target"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
-    dsets["test"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_test())
+    if args.dset == 'office_home':
+        dsets["source"] = data_list.ImageList(open(args.s_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
+        dsets["target"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
+        dsets["test"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_test())
+    else:
+        # pdb.set_trace()
+        # print(args)
+        dataset = datasets.__dict__[args.dset]
+        p_dataset = partial_dataset(dataset)
+        dsets["source"] = dataset(root=args.dset_path, task=args.s_name, download=True, transform=image_train(pre_process=args.pre_process))
+        dsets["target"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_train(pre_process=args.pre_process))
+        dsets["test"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_test())
 
     dset_loaders = {}
     if args.balance == 0:
@@ -87,20 +113,59 @@ def train(args):
                                             prefetch_factor=8,
                                             drop_last=True)
     else:
-        source_labels = torch.tensor([i[1] for i in dsets["source"].imgs])
+        if args.dset == 'office_home':
+            source_labels = torch.tensor([i[1] for i in dsets["source"].imgs])
+            # print([i[0] for i in dsets["target"].imgs][:10])
+            # print([i for i in dsets["target"].imgs][:10])
+        else:
+            source_labels = torch.tensor(list(zip(*(dsets["source"].samples)))[1])
+            # print(list(zip(*(dsets["target"].samples)))[0][:10])
+            # print(list(zip(*(dsets["target"].samples)))[1][:10])
+            # print(dsets["target"].samples)
         train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
         dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
                                             prefetch_factor=8
                                             )
+    # pdb.set_trace()
+    # for i in dsets["target"].samples:
+    #     print(i)
     #########
+    # def print_info(worker_id):
+    #     a = torch.utils.data.get_worker_info()
+    #     print(a)
+
     dset_loaders["target"] = DataLoader(dsets["target"], batch_size=train_bs, shuffle=True,
                                         num_workers=args.worker, drop_last=True,
-                                        prefetch_factor=8
+                                        prefetch_factor=8,
                                         )
     dset_loaders["test"]   = DataLoader(dsets["test"], batch_size=test_bs, shuffle=False,
                                         num_workers=args.worker,
                                         prefetch_factor=8
                                         )
+    # #### debug
+    # # # iter_source = iter(dset_loaders["source"])
+    # iter_target = iter(dset_loaders["target"])
+    # # # iter_test = iter(dset_loaders["test"])
+    # # pdb.set_trace()
+    # # print(len(dsets["target"]))
+    # # print(dsets["target"].samples)
+    # for _ in range(5):
+    #     # xs, ys = iter_source.next()
+    #     xt, yt, i = iter_target.next()
+    #     # print(xs[:10, 0, 0, 0])
+    #     # print(ys[:10])
+    #     print(xt[:10, 0, 0, 0])
+    #     print(yt[:10])
+    #     print(i)
+
+    # for i in range(len(len(iter_target))):
+    #     # xs, ys = dsets["source"][i]
+    #     xt, yt = dsets["target"][i]
+    #     # print(xs[0, 0, 0])
+    #     # print(ys)
+    #     print(xt[ 0, 0, 0])
+    #     print(yt)
+
 
     if "ResNet" in args.net:
         params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num, 'init_fc':args.init_fc}
@@ -124,7 +189,23 @@ def train(args):
     # pdb.set_trace()
 
     D_Net_parames = [j for (i, j) in domain_D.named_parameters() if i != 'h']
-    optimizer_D = optim.RMSprop(D_Net_parames, lr=args.lr_D)
+
+    if args.opt_D == 0:
+        optimizer_D = optim.RMSprop(D_Net_parames, lr=args.lr_D)
+    elif args.opt_D == 1:
+        optimizer_D = optim.Adam(D_Net_parames, lr=args.lr_D)
+    elif args.opt_D == 2:
+        optimizer_D = optim.Adam(D_Net_parames, lr=args.lr_D, betas=(0, 0.99))
+    elif args.opt_D == 3:
+        optimizer_D = optim.Adam(D_Net_parames, lr=args.lr_D, betas=(0, 0.5))
+    elif args.opt_D == 4:
+        optimizer_config_G = {"type":torch.optim.Adam, "optim_params":
+                            {'lr':args.lr_D, "weight_decay":5e-4}
+                            }
+        optimizer_D = optim.Adam(D_Net_parames,**(optimizer_config_G["optim_params"]))
+    if args.opt_D == 5:
+        optimizer_D = optim.RMSprop(D_Net_parames, lr=args.lr_D)
+
 
     ## set optimizer
     if args.opt_G == 0:
@@ -155,24 +236,27 @@ def train(args):
     schedule_param = optimizer_config["lr_param"]
     lr_scheduler = lr_schedule.schedule_dict[optimizer_config["lr_type"]]
 
+    if args.opt_D == 5:
+        lr_scheduler_D = LambdaLR(optimizer_D, lambda x: args.lr_D * (1. + 0.001 * float(x)) ** (-0.75))
+
     feature_extractor = nn.Sequential(base_network.module.feature_layers, nn.Flatten(), base_network.module.bottleneck).to('cuda')
     for i in range(args.max_iterations + 1):
 
         if (i % args.test_interval == 0 and i > 0) or (i == args.max_iterations):
-        # if (i % args.test_interval == 0) or (i == args.max_iterations):
             # obtain the class-level weight and evalute the current model
             base_network.train(False)
             temp_acc = image_classification(dset_loaders, base_network)
             args.writer.add_scalar('Test/t_acc', temp_acc, i // args.test_interval)
 
-
-            source_feature = collect_feature(dset_loaders["source"], feature_extractor, device)
-            target_feature = collect_feature(dset_loaders["target"], feature_extractor, device)
-            # plot t-SNE
-            tsne_name = '{}_TSNE.png'.format(i)
-            tSNE_filename = os.path.join(args.Log_path, tsne_name)
-            visualize(source_feature, target_feature, tSNE_filename)
-            print("Saving t-SNE to", tSNE_filename)
+            if i == args.max_iterations:
+            # if (i % args.test_interval == 0 and i > 0) or (i == args.max_iterations):
+                source_feature = collect_feature(dset_loaders["source"], feature_extractor, device)
+                target_feature = collect_feature(dset_loaders["target"], feature_extractor, device)
+                # plot t-SNE
+                tsne_name = '{}_TSNE.png'.format(i)
+                tSNE_filename = os.path.join(args.Log_path, tsne_name)
+                visualize(source_feature, target_feature, tSNE_filename)
+                print("Saving t-SNE to", tSNE_filename)
 
 
         base_network.train(True)
@@ -230,6 +314,9 @@ def train(args):
             d_loss_all.backward()
             optimizer_D.step()
 
+        if args.opt_D == 5:
+            lr_scheduler_D.step()
+
         cor_s_g = Concate_w(g_xs, ys_onehot.to('cuda'), weight=args.d_weight_label)
         cor_t_g = Concate_w(g_xt, yt_predict, weight=args.d_weight_label)
 
@@ -270,7 +357,7 @@ if __name__ == "__main__":
     parser.add_argument('--worker', type=int, default=4, help="number of workers") 
     parser.add_argument('--net', type=str, default='ResNet50', choices=["ResNet50", "VGG16"])
     
-    parser.add_argument('--dset', type=str, default='office_home', choices=["office", "office_home", "imagenet_caltech"])
+    parser.add_argument('--dset', type=str, default='office_home', choices=["VisDA2017", "OfficeHome", "office_home", "imagenet_caltech"])
     parser.add_argument('--test_interval', type=int, default=500, help="interval of two continuous test phase")
     
     ########
@@ -286,6 +373,7 @@ if __name__ == "__main__":
     parser.add_argument('--point_mass', type=float, default=1.0)
     parser.add_argument('--cls_weight', type=float, default=1.)
     parser.add_argument('--opt_G', type=int, default=0, help='0: SGD momentum 1:RMSprop 2: SGD 3: RMSProp no schedule')
+    parser.add_argument('--opt_D', type=int, default=0, help='0: SGD momentum 1:RMSprop 2: SGD 3: RMSProp no schedule')
     parser.add_argument('--entropy', type=float, default=0., help='entropy weight')
     parser.add_argument('--entropy_s', type=float, default=0., help='entropy weight')
     parser.add_argument('--pre_process', type=int, default=0, help='')
@@ -304,6 +392,32 @@ if __name__ == "__main__":
             args.balance = 1
         else:
             args.balance = 0
+
+    if args.dset =='OfficeHome':
+        names = ['Ar', 'Cl', 'Pr', 'Rw']
+        k = 25
+        args.class_num = 65
+        args.test_interval = 500
+        if args.batch_size == 65:
+            args.balance = 1
+        else:
+            args.balance = 0
+        args.s_name = names[args.s]
+        args.t_name = names[args.t]
+
+    if args.dset == 'VisDA2017':
+        names = ['Synthetic', 'Real']
+        k = 6
+        args.class_num = 12
+        args.test_interval = 500
+        if args.batch_size % 12 == 0:
+            args.balance = 1
+        else:
+            args.balance = 0
+        args.s = 0
+        args.t = 1
+        args.s_name = names[args.s]
+        args.t_name = names[args.t]
 
     if args.dset == 'office':
         names = ['amazon', 'dslr', 'webcam']
@@ -328,19 +442,24 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
+    cudnn.deterministic = True
+    cudnn.benchmark = False
 
     data_folder = './data/'
-    args.s_dset_path = data_folder + args.dset + '/' + names[args.s] + '_list.txt'
-    args.t_dset_path = data_folder + args.dset + '/' + names[args.t] + '_' + str(k) + '_list.txt'
+    if args.dset == 'office_home':
+        args.s_dset_path = data_folder + args.dset + '/' + names[args.s] + '_list.txt'
+        args.t_dset_path = data_folder + args.dset + '/' + names[args.t] + '_' + str(k) + '_list.txt'
+    else:
+        args.dset_path = data_folder + args.dset
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
 
-    setting_name = 'h_{}_N_{}_ly_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}' \
-                   '_init{}_r_{}'.format(
-                    args.d_hidden, args.d_norm, args.d_leaky, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
+    setting_name = '{}_h_{}_N_{}_ly_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}' \
+                   '_init{}_r_{}_opt_D_{}'.format(
+                    args.dset, args.d_hidden, args.d_norm, args.d_leaky, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
                     args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy, args.entropy_s,
-                    args.batch_size, args.pre_process, args.init_fc, args.pm_ratio)
+                    args.batch_size, args.pre_process, args.init_fc, args.pm_ratio, args.opt_D)
 
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)
