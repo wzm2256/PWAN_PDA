@@ -94,18 +94,11 @@ def train(args):
     train_bs, test_bs = args.batch_size, args.batch_size * 2
 
     dsets = {}
-    if args.dset == 'office_home':
-        dsets["source"] = data_list.ImageList(open(args.s_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
-        dsets["target"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_train(pre_process=args.pre_process))
-        dsets["test"] = data_list.ImageList(open(args.t_dset_path).readlines(), transform=image_test())
-    else:
-        # pdb.set_trace()
-        # print(args)
-        dataset = datasets.__dict__[args.dset]
-        p_dataset = partial_dataset(dataset)
-        dsets["source"] = dataset(root=args.dset_path, task=args.s_name, download=True, transform=image_train(pre_process=args.pre_process))
-        dsets["target"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_train(pre_process=args.pre_process))
-        dsets["test"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_test())
+    dataset = datasets.__dict__[args.dset]
+    p_dataset = partial_dataset(dataset)
+    dsets["source"] = dataset(root=args.dset_path, task=args.s_name, download=True, transform=image_train(pre_process=args.pre_process))
+    dsets["target"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_train(pre_process=args.pre_process))
+    dsets["test"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_test())
 
     dset_loaders = {}
     if args.balance == 0:
@@ -113,15 +106,7 @@ def train(args):
                                             prefetch_factor=8,
                                             drop_last=True)
     else:
-        if args.dset == 'office_home':
-            source_labels = torch.tensor([i[1] for i in dsets["source"].imgs])
-            # print([i[0] for i in dsets["target"].imgs][:10])
-            # print([i for i in dsets["target"].imgs][:10])
-        else:
-            source_labels = torch.tensor(list(zip(*(dsets["source"].samples)))[1])
-            # print(list(zip(*(dsets["target"].samples)))[0][:10])
-            # print(list(zip(*(dsets["target"].samples)))[1][:10])
-            # print(dsets["target"].samples)
+        source_labels = torch.tensor(list(zip(*(dsets["source"].samples)))[1])
         train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
         dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
                                             prefetch_factor=8
@@ -142,29 +127,6 @@ def train(args):
                                         num_workers=args.worker,
                                         prefetch_factor=8
                                         )
-    # #### debug
-    # # # iter_source = iter(dset_loaders["source"])
-    # iter_target = iter(dset_loaders["target"])
-    # # # iter_test = iter(dset_loaders["test"])
-    # # pdb.set_trace()
-    # # print(len(dsets["target"]))
-    # # print(dsets["target"].samples)
-    # for _ in range(5):
-    #     # xs, ys = iter_source.next()
-    #     xt, yt, i = iter_target.next()
-    #     # print(xs[:10, 0, 0, 0])
-    #     # print(ys[:10])
-    #     print(xt[:10, 0, 0, 0])
-    #     print(yt[:10])
-    #     print(i)
-
-    # for i in range(len(len(iter_target))):
-    #     # xs, ys = dsets["source"][i]
-    #     xt, yt = dsets["target"][i]
-    #     # print(xs[0, 0, 0])
-    #     # print(ys)
-    #     print(xt[ 0, 0, 0])
-    #     print(yt)
 
 
     if "ResNet" in args.net:
@@ -357,7 +319,7 @@ if __name__ == "__main__":
     parser.add_argument('--worker', type=int, default=4, help="number of workers") 
     parser.add_argument('--net', type=str, default='ResNet50', choices=["ResNet50", "VGG16"])
     
-    parser.add_argument('--dset', type=str, default='office_home', choices=["VisDA2017", "OfficeHome", "office_home", "imagenet_caltech"])
+    parser.add_argument('--dset', type=str, default='OfficeHome', choices=["VisDA2017", "OfficeHome", "imagenet_caltech"])
     parser.add_argument('--test_interval', type=int, default=500, help="interval of two continuous test phase")
     
     ########
@@ -382,16 +344,6 @@ if __name__ == "__main__":
     parser.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
 
     args = parser.parse_args()
-
-    if args.dset == 'office_home':
-        names = ['Art', 'Clipart', 'Product', 'RealWorld']
-        k = 25
-        args.class_num = 65
-        args.test_interval = 500
-        if args.batch_size == 65:
-            args.balance = 1
-        else:
-            args.balance = 0
 
     if args.dset =='OfficeHome':
         names = ['Ar', 'Cl', 'Pr', 'Rw']
@@ -446,11 +398,7 @@ if __name__ == "__main__":
     cudnn.benchmark = False
 
     data_folder = './data/'
-    if args.dset == 'office_home':
-        args.s_dset_path = data_folder + args.dset + '/' + names[args.s] + '_list.txt'
-        args.t_dset_path = data_folder + args.dset + '/' + names[args.t] + '_' + str(k) + '_list.txt'
-    else:
-        args.dset_path = data_folder + args.dset
+    args.dset_path = data_folder + args.dset
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 

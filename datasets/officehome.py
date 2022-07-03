@@ -1,8 +1,9 @@
 import os
+import pdb
 from typing import Optional
 from .imagelist import ImageList
 from ._util import download as download_data, check_exits
-
+import shutil
 
 class OfficeHome(ImageList):
     """`OfficeHome <http://hemanthdv.org/OfficeHome-Dataset/>`_ Dataset.
@@ -38,12 +39,14 @@ class OfficeHome(ImageList):
         ("Product", "Product.tgz", "https://cloud.tsinghua.edu.cn/f/76186deacd7c4fa0a679/?dl=1"),
         ("Real_World", "Real_World.tgz", "https://cloud.tsinghua.edu.cn/f/dee961894cc64b1da1d7/?dl=1")
     ]
+
     image_list = {
         "Ar": "image_list/Art.txt",
         "Cl": "image_list/Clipart.txt",
         "Pr": "image_list/Product.txt",
         "Rw": "image_list/Real_World.txt",
     }
+
     CLASSES = sorted(['Drill', 'Exit_Sign', 'Bottle', 'Glasses', 'Computer', 'File_Cabinet', 'Shelf', 'Toys', 'Sink',
                'Laptop', 'Kettle', 'Folder', 'Keyboard', 'Flipflops', 'Pencil', 'Bed', 'Hammer', 'ToothBrush', 'Couch',
                'Bike', 'Postit_Notes', 'Mug', 'Webcam', 'Desk_Lamp', 'Telephone', 'Helmet', 'Mouse', 'Pen', 'Monitor',
@@ -55,11 +58,18 @@ class OfficeHome(ImageList):
     def __init__(self, root: str, task: str, download: Optional[bool] = False, **kwargs):
         assert task in self.image_list
         data_list_file = os.path.join(root, self.image_list[task])
-
+        data_list_folder = os.path.join(root, 'image_list')
         if download:
             list(map(lambda args: download_data(root, *args), self.download_list))
         else:
             list(map(lambda file_name, _: check_exits(root, file_name), self.download_list))
+
+        # change data_list_file
+        # pdb.set_trace()
+        if os.path.isdir(os.path.join(root, '..', 'OfficeHome_imagelist')) and not os.path.isdir(os.path.join(root, 'image_list_bak')) :
+            shutil.move(data_list_folder, data_list_folder + '_bak')
+            shutil.copytree(os.path.join(root, '..', 'OfficeHome_imagelist'), data_list_folder)
+            print('Sort the labels.')
 
         super(OfficeHome, self).__init__(root, OfficeHome.CLASSES, data_list_file=data_list_file, **kwargs)
 
