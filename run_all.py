@@ -29,6 +29,17 @@ args_ps.add_argument('--pre_process', type=int, default=0, help='')
 args_ps.add_argument('--init_fc', type=int, default=0, help='')
 args_ps.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
 args_ps.add_argument('--max_iterations', type=int, default=5000, help="max iterations")
+args_ps.add_argument('--mass_inc', default=0, type=int)
+args_ps.add_argument('--seed', default='0', type=str)
+args_ps.add_argument('--entropy_w', type=float, default=0, help="")
+
+
+args_ps.add_argument('--auto_ratio', type=int, default=0, help="")
+args_ps.add_argument('--detach_ent', type=int, default=0, help="")
+args_ps.add_argument('--label_smooth', type=int, default=0, help="")
+args_ps.add_argument('--cat_smooth', type=int, default=0, help="")
+args_ps.add_argument('--NoRelu', type=int, default=0, help="")
+args_ps.add_argument('--normalize', type=int, default=0, help="")
 
 args_ps.add_argument('--task_list', default='0', type=str)
 
@@ -67,18 +78,26 @@ ST = [
 ]
 
 task_list = [int(i) for i in args.task_list.strip().split(',')]
+seed_list = [int(i) for i in args.seed.strip().split(',')]
 
-prepare_data.OfficeHome(root='data/office_home/images/')
+# prepare_data.OfficeHome(root='data/office_home/images/')
 
 for task in task_list:
 	st = ST[task]
-	run(1, ['--dset', '--s', '--t', '--max_iterations', '--batch_size', '--worker', '--d_leaky',
-	                         '--point_mass', '--trade_off', '--d_iter', '--d_norm',
-	                         '--d_hidden', '--lr_D', '--d_weight_label', '--cls_weight', 
-	                         '--opt_G', '--entropy', '--entropy_s', '--lr',
-	                        '--pre_process', '--init_fc', '--pm_ratio', '--opt_D'],
-		[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
-		 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
-		 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight, 
-		 args.opt_G, args.entropy, args.entropy_s, args.lr_G,
-		  args.pre_process, args.init_fc, args.pm_ratio, args.opt_D])
+	for s in seed_list:
+		run(1, ['--dset', '--s', '--t', '--max_iterations', '--batch_size', '--worker', '--d_leaky',
+		                         '--point_mass', '--trade_off', '--d_iter', '--d_norm',
+		                         '--d_hidden', '--lr_D', '--d_weight_label', '--cls_weight',
+		                         '--opt_G', '--entropy', '--entropy_s', '--lr',
+		                        '--pre_process', '--init_fc', '--pm_ratio', '--opt_D',
+		                        '--mass_inc', '--seed', '--auto_ratio', '--detach_ent',
+		                        '--label_smooth', '--cat_smooth', '--NoRelu', '--normalize',
+		                        '--entropy_w'],
+			[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
+			 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
+			 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight,
+			 args.opt_G, args.entropy, args.entropy_s, args.lr_G,
+			  args.pre_process, args.init_fc, args.pm_ratio, args.opt_D,
+			 args.mass_inc, s, args.auto_ratio, args.detach_ent,
+			 args.label_smooth, args.cat_smooth, args.NoRelu, args.normalize,
+			 args.entropy_w])

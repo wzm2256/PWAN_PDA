@@ -1,3 +1,4 @@
+import copy
 import argparse
 import os, random, pdb, math, sys
 import numpy as np
@@ -11,7 +12,7 @@ from utils import *
 from GAN_model.D import D2
 from GAN_model.Grad import Grad_Penalty
 import torch.optim as optim
-from GAN_model.util import cal_dloss, Concate_w, Entropy
+from GAN_model.util import cal_dloss, Concate_w, Entropy, cal_dloss_inc, Entropy_whole
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
@@ -111,13 +112,6 @@ def train(args):
         dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
                                             prefetch_factor=8
                                             )
-    # pdb.set_trace()
-    # for i in dsets["target"].samples:
-    #     print(i)
-    #########
-    # def print_info(worker_id):
-    #     a = torch.utils.data.get_worker_info()
-    #     print(a)
 
     dset_loaders["target"] = DataLoader(dsets["target"], batch_size=train_bs, shuffle=True,
                                         num_workers=args.worker, drop_last=True,
@@ -128,14 +122,26 @@ def train(args):
                                         prefetch_factor=8
                                         )
 
+    if args.auto_ratio == 1:
+
+        print('Dataset size -- source: {} \t target: {} \t ratio: {}'.format(len(dsets["source"]),
+                len(dsets["target"]), len(dsets["target"]) / len(dsets["source"])))
+        set_ratio = len(dsets["target"]) / len(dsets["source"])
+        args.point_mass = set_ratio
+        print('Setting point mass to: {}'.format(set_ratio))
+
 
     if "ResNet" in args.net:
-        params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num, 'init_fc':args.init_fc}
+        if args.dset == 'ImageNetCaltech':
+            params = {"resnet_name": args.net, "use_bottleneck": False, "new_cls": False, 'class_num': args.class_num}
+        else:
+            params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True,
+                      'class_num': args.class_num, 'init_fc':args.init_fc, "NoRelu":args.NoRelu, "normalize":args.normalize}
         base_network = network.ResNetFc(**params)
     
-    if "VGG" in args.net:
-        params = {"vgg_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num}
-        base_network = network.VGGFc(**params)
+    # if "VGG" in args.net:
+    #     params = {"vgg_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num}
+    #     base_network = network.VGGFc(**params)
 
     # pdb.set_trace()
     base_network = base_network.cuda()
@@ -143,7 +149,13 @@ def train(args):
     parameter_list = base_network.get_parameters()
     base_network = torch.nn.DataParallel(base_network).cuda() 
 
-    domain_D = D2(in_feature=256 + args.class_num, hidden_size=args.d_hidden, norm_I=args.d_norm,
+    if args.label_smooth == 1:
+        my_CrossEntropy = CrossEntropyLabelSmooth(args.class_num)
+    else:
+        my_CrossEntropy = torch.nn.CrossEntropyLoss()
+
+    # pdb.set_trace()
+    domain_D = D2(in_feature=base_network.module.output_num() + args.class_num, hidden_size=args.d_hidden, norm_I=args.d_norm,
                   leaky=args.d_leaky).to(device)
 
     G_P = Grad_Penalty(100, gamma=1, device='cuda')
@@ -190,6 +202,11 @@ def train(args):
                             {'lr': args.lr},
                             "lr_type": "inv", "lr_param": {"lr": args.lr, "gamma": 0.001, "power": 0.75}
                             }
+    elif args.opt_G == 4:
+        optimizer_config = {"type": torch.optim.RMSprop, "optim_params":
+                            {'lr': args.lr, "weight_decay":5e-4,},
+                            "lr_type": "null", "lr_param": {"lr": args.lr}
+                            }
     optimizer = optimizer_config["type"](parameter_list,**(optimizer_config["optim_params"]))
 
     param_lr = []
@@ -204,24 +221,32 @@ def train(args):
     feature_extractor = nn.Sequential(base_network.module.feature_layers, nn.Flatten(), base_network.module.bottleneck).to('cuda')
     for i in range(args.max_iterations + 1):
 
-        if (i % args.test_interval == 0 and i > 0) or (i == args.max_iterations):
+        if (i % args.test_interval == 0) or (i == args.max_iterations):
+        # if i == 1:
             # obtain the class-level weight and evalute the current model
             base_network.train(False)
             temp_acc = image_classification(dset_loaders, base_network)
             args.writer.add_scalar('Test/t_acc', temp_acc, i // args.test_interval)
 
+            # if i > -1:
             if i == args.max_iterations:
+            # if i == 1:
             # if (i % args.test_interval == 0 and i > 0) or (i == args.max_iterations):
-                source_feature = collect_feature(dset_loaders["source"], feature_extractor, device)
-                target_feature = collect_feature(dset_loaders["target"], feature_extractor, device)
+                source_feature, source_label = collect_feature(dset_loaders["source"], feature_extractor, device, 10000)
+                target_feature, target_label = collect_feature(dset_loaders["target"], feature_extractor, device, 10000)
+                # pdb.set_trace()
                 # plot t-SNE
-                tsne_name = '{}_TSNE.png'.format(i)
-                tSNE_filename = os.path.join(args.Log_path, tsne_name)
-                visualize(source_feature, target_feature, tSNE_filename)
-                print("Saving t-SNE to", tSNE_filename)
+                # pdb.set_trace()
+                # source_feature = torch.nn.functional.normalize(source_feature, dim=1)
+                # target_feature = torch.nn.functional.normalize(target_feature, dim=1)
+                visualize(source_feature, target_feature, source_label, target_label,
+                          color_label=args.color_label, logpath=args.Log_path, name=i)
+                # print("Saving t-SNE to", tSNE_filename)
 
+            base_network.train(True)
 
-        base_network.train(True)
+        # if args.opt_G != 4:
+        # pdb.set_trace()
         optimizer = lr_scheduler(optimizer, i, **schedule_param)
         
         # train one iter
@@ -247,7 +272,11 @@ def train(args):
 
         # pdb.set_trace()
         ###############################################################
-        ys_onehot = F.one_hot(ys, num_classes=args.class_num).float()
+
+        if args.label_smooth == 1 and args.cat_smooth == 1:
+            ys_onehot = my_CrossEntropy.smooth(ys)
+        else:
+            ys_onehot = F.one_hot(ys, num_classes=args.class_num).float()
 
         yt_predict = F.softmax(f_g_xt, -1)
         cor_s_d = Concate_w(g_xs.detach(), ys_onehot.to('cuda'), weight=args.d_weight_label)
@@ -258,7 +287,11 @@ def train(args):
         for d in range(args.d_iter):
             potential_r = domain_D(cor_s_d)
             potential_f = domain_D(cor_t_d)
-            d_loss = cal_dloss(potential_r, potential_f, args.point_mass * args.q ** i)
+
+            if args.mass_inc == 1:
+                d_loss = cal_dloss_inc(potential_r, potential_f, args.point_mass * args.q ** i)
+            else:
+                d_loss = cal_dloss(potential_r, potential_f, args.point_mass * args.q ** i)
 
             if d == 0:
                 gp_loss, M = G_P(d_loss, [cor_s_d, cor_t_d])
@@ -284,15 +317,32 @@ def train(args):
 
         potential_r_g = domain_D(cor_s_g)
         potential_f_g = domain_D(cor_t_g)
-        transfer_loss = -cal_dloss(potential_r_g, potential_f_g, args.point_mass * args.q ** i)
+
+        if args.mass_inc == 1:
+            transfer_loss = -cal_dloss_inc(potential_r_g, potential_f_g, args.point_mass * args.q ** i)
+        else:
+            transfer_loss = -cal_dloss(potential_r_g, potential_f_g, args.point_mass * args.q ** i)
 
         #########################################################################
         # transfer_loss = torch.tensor(0.)
         # d_loss = torch.tensor(0.)
         #########################################################################
 
-        classifier_loss = torch.nn.CrossEntropyLoss()(f_g_xs, ys)
-        total_loss = classifier_loss * args.cls_weight + transfer_loss * args.trade_off + args.entropy * Entropy(f_g_xt).mean() + args.entropy_s * Entropy(f_g_xs).mean()
+        if args.detach_ent == 1:
+            # pdb.set_trace()
+            fc_copy = copy.deepcopy(base_network.module.fc)
+            for param in fc_copy.parameters():
+                param.requires_grad = False
+            target_ent = Entropy(fc_copy(g_xt)).mean()
+        else:
+            target_ent = Entropy(f_g_xt).mean()
+
+        target_ent_whole = Entropy_whole(f_g_xt)
+        classifier_loss = my_CrossEntropy(f_g_xs, ys)
+
+        total_loss = classifier_loss * args.cls_weight + transfer_loss * args.trade_off + \
+                     args.entropy * target_ent + args.entropy_s * Entropy(f_g_xs).mean() + \
+                     args.entropy_w * target_ent_whole
             
         optimizer.zero_grad()
         total_loss.backward()
@@ -319,10 +369,18 @@ if __name__ == "__main__":
     parser.add_argument('--worker', type=int, default=4, help="number of workers") 
     parser.add_argument('--net', type=str, default='ResNet50', choices=["ResNet50", "VGG16"])
     
-    parser.add_argument('--dset', type=str, default='OfficeHome', choices=["VisDA2017", "OfficeHome", "imagenet_caltech"])
+    parser.add_argument('--dset', type=str, default='OfficeHome', choices=["VisDA2017", "OfficeHome", "ImageNetCaltech"])
     parser.add_argument('--test_interval', type=int, default=500, help="interval of two continuous test phase")
-    
+    parser.add_argument('--auto_ratio', type=int, default=0, help="")
+    parser.add_argument('--detach_ent', type=int, default=0, help="")
+    parser.add_argument('--label_smooth', type=int, default=0, help="")
+    parser.add_argument('--cat_smooth', type=int, default=0, help="")
+    parser.add_argument('--NoRelu', type=int, default=0, help="")
+    parser.add_argument('--normalize', type=int, default=0, help="")
+    parser.add_argument('--entropy_w', type=float, default=0, help="")
+
     ########
+    parser.add_argument('--mass_inc', default=0, type=int)
     parser.add_argument('--lr', type=float, default=1e-4, help="learning rate")
     parser.add_argument('--d_hidden', default=256, type=int)
     parser.add_argument('--d_norm', default=0, type=int)
@@ -356,6 +414,7 @@ if __name__ == "__main__":
             args.balance = 0
         args.s_name = names[args.s]
         args.t_name = names[args.t]
+        args.color_label = False
 
     if args.dset == 'VisDA2017':
         names = ['Synthetic', 'Real']
@@ -370,25 +429,23 @@ if __name__ == "__main__":
         args.t = 1
         args.s_name = names[args.s]
         args.t_name = names[args.t]
+        args.color_label = True
 
-    if args.dset == 'office':
-        names = ['amazon', 'dslr', 'webcam']
-        k = 10
-        args.class_num = 31
-        args.max_iterations = 2000
-        args.test_interval = 200
-        args.lr=1e-4
-
-    if args.dset == 'imagenet_caltech':
-        names = ['imagenet', 'caltech']
+    if args.dset == 'ImageNetCaltech':
+        names = ['I', 'C']
         k = 84
-        args.class_num = 1000
         if args.s == 1:
             args.class_num = 256
+        else:
+            args.class_num = 1000
+        args.balance = 0
+        args.s_name = names[args.s]
+        args.t_name = names[args.t]
 
-        args.max_iterations = 40000
-        args.test_interval = 4000
-        args.lr=1e-3
+        # args.max_iterations = 40000
+        # args.test_interval = 4000
+        # args.lr=1e-3
+        args.color_label = False
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
@@ -402,12 +459,12 @@ if __name__ == "__main__":
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
-
-    setting_name = '{}_h_{}_N_{}_ly_{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_ent_s_{}_bs_{}_pre_{}' \
-                   '_init{}_r_{}_opt_D_{}'.format(
-                    args.dset, args.d_hidden, args.d_norm, args.d_leaky, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
-                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy, args.entropy_s,
-                    args.batch_size, args.pre_process, args.init_fc, args.pm_ratio, args.opt_D)
+    setting_name = '{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_entw_{}_bs_{}' \
+                   '_r_{}_Dent_{}_smo_{}_cats_{}_NoR_{}_norm_{}_init_{}_inc_{}_seed_{}'.format(
+                    args.dset, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
+                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy, args.entropy_w,
+                    args.batch_size, args.pm_ratio, args.detach_ent, args.label_smooth, args.cat_smooth,
+                    args.NoRelu, args.normalize, args.init_fc, args.mass_inc, args.seed)
 
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)

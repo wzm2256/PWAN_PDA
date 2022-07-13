@@ -31,7 +31,8 @@ def grl_hook(coeff):
     return fun1
 
 class ResNetFc(nn.Module):
-  def __init__(self, resnet_name, use_bottleneck=True, bottleneck_dim=256, new_cls=False, class_num=1000, init_fc=0):
+  def __init__(self, resnet_name, use_bottleneck=True, bottleneck_dim=256, new_cls=False, class_num=1000,
+               init_fc=0, NoRelu=0, normalize=0):
     super(ResNetFc, self).__init__()
     model_resnet = resnet_dict[resnet_name](pretrained=True)
     self.conv1 = model_resnet.conv1
@@ -48,13 +49,25 @@ class ResNetFc(nn.Module):
 
     self.use_bottleneck = use_bottleneck
     self.new_cls = new_cls
+    self.normalize = normalize
+    self.NoRelu = NoRelu
     if new_cls:
         if self.use_bottleneck:
-            self.bottleneck = \
-                nn.Sequential(nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
-                nn.BatchNorm1d(bottleneck_dim),
-                nn.ReLU())
-            self.fc = nn.Linear(bottleneck_dim, class_num)
+            if NoRelu == 1 or NoRelu == 2:
+                self.bottleneck = nn.Sequential(
+                    nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
+                    nn.BatchNorm1d(bottleneck_dim))
+            else:
+                self.bottleneck = nn.Sequential(
+                    nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
+                    nn.BatchNorm1d(bottleneck_dim),
+                    nn.ReLU())
+            if self.normalize == 1:
+                self.fc = torch.nn.utils.weight_norm(nn.Linear(bottleneck_dim, class_num))
+            elif self.normalize == 3:
+                self.fc = SLR_layer(bottleneck_dim, class_num, bias=True)
+            else:
+                self.fc = nn.Linear(bottleneck_dim, class_num)
             if init_fc == 1:
                 self.bottleneck.apply(init_weights)
                 self.fc.apply(init_weights)
@@ -63,9 +76,11 @@ class ResNetFc(nn.Module):
             self.fc = nn.Linear(model_resnet.fc.in_features, class_num)
             self.fc.apply(init_weights)
             self.__in_features = model_resnet.fc.in_features
+            self.bottleneck = nn.Sequential()  # identity bottleneck
     else:
         self.fc = model_resnet.fc
         self.__in_features = model_resnet.fc.in_features
+        self.bottleneck = nn.Sequential()  # identity bottleneck
 
   def forward(self, x):
     x = self.feature_layers(x)
@@ -73,7 +88,14 @@ class ResNetFc(nn.Module):
     x = x.view(x.size(0), -1)
     if self.use_bottleneck and self.new_cls:
         x = self.bottleneck(x)
-    y = self.fc(x)
+
+    if self.normalize == 2:
+        x = 10 * torch.nn.functional.normalize(x, dim=1)
+
+    if self.NoRelu == 2:
+        y = self.fc(nn.functional.relu(x))
+    else:
+        y = self.fc(x)
     return x, y
 
   def output_num(self):
@@ -190,3 +212,24 @@ class AdversarialNetwork(nn.Module):
 
   def get_parameters(self):
     return [{"params":self.parameters(), "lr_mult":10, 'decay_mult':2}]
+
+import torch.nn.functional as F
+class SLR_layer(nn.Module):
+    def __init__(self, in_features, out_features,bias=True):
+        super(SLR_layer, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+        self.bias=torch.nn.Parameter(torch.zeros(out_features))
+        self.bias_bool = bias
+        nn.init.xavier_uniform_(self.weight)
+
+    def forward(self, input):
+        r=input.norm(dim=1).detach()[0]
+        if self.bias_bool:
+            cosine = F.linear(input, F.normalize(self.weight),r*torch.tanh(self.bias))
+        else:
+            cosine = F.linear(input, F.normalize(self.weight))
+        output=cosine
+        return output
+

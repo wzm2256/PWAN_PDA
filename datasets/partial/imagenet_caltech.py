@@ -1,4 +1,5 @@
 import os
+import pdb
 from typing import Optional
 from ..imagelist import ImageList
 from .._util import download as download_data, check_exits
@@ -424,6 +425,7 @@ class ImageNetCaltech(ImageList):
     CLASSES = _CLASSES
 
     def __init__(self, root: str, task: str, download: Optional[bool] = True, **kwargs):
+        # pdb.set_trace()
         assert task in self.image_list
         data_list_file = os.path.join(root, self.image_list[task])
 
