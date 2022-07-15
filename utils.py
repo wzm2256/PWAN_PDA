@@ -203,7 +203,7 @@ def collect_feature(data_loader: DataLoader, feature_extractor: nn.Module,
     all_features = []
     all_target = []
     with torch.no_grad():
-        for i, (images, target) in enumerate(tqdm.tqdm(data_loader)):
+        for i, (images, target, index) in enumerate(tqdm.tqdm(data_loader)):
             images = images.to(device)
             feature = feature_extractor(images).cpu()
             # Fea = feature_extractor(images)
@@ -349,3 +349,70 @@ def obtain_label(loader, feat_ext, fc, distance='cosine', threshold=0.3):
 
     return predict.astype('int')
 
+def marginloss(yHat, y, classes=65, alpha=1, weight=None):
+    batch_size = len(y)
+    classes = classes
+    yHat = F.softmax(yHat, dim=1)
+    Yg = torch.gather(yHat, 1, torch.unsqueeze(y, 1))#.detach()
+    Yg_ = (1 - Yg) + 1e-7  # avoiding numerical issues (first)
+    Px = yHat / Yg_.view(len(yHat), 1)
+    Px_log = torch.log(Px + 1e-10)  # avoiding numerical issues (second)
+    y_zerohot = torch.ones(batch_size, classes).scatter_(
+        1, y.view(batch_size, 1).data.cpu(), 0)
+
+    output = Px * Px_log * y_zerohot.cuda()
+    loss = torch.sum(output, dim=1)/ np.log(classes - 1)
+    Yg_ = Yg_ ** alpha
+    if weight is not None:
+        # pdb.set_trace()
+        weight *= (Yg_.view(len(yHat), )/ Yg_.sum())
+    else:
+        weight = (Yg_.view(len(yHat), )/ Yg_.sum())
+
+    weight = weight.detach()
+    loss = torch.sum(weight * loss) / torch.sum(weight)
+
+    return loss
+
+
+def source_only():
+    for i in range(args.pre_train):
+
+        optimizer_bak = lr_scheduler(optimizer_bak, i, **schedule_param)
+
+        # train one iter
+        if i % len(dset_loaders["source"]) == 0:
+            iter_source = iter(dset_loaders["source"])
+        # if i % len(dset_loaders["test"]) == 0:
+        # 	iter_target = iter(dset_loaders["test"])
+
+        xs, ys, ind_s = iter_source.next()
+        # xt, yt, ind_t = iter_target.next()
+        # xs, xt, ys = xs.cuda(), xt.cuda(), ys.cuda()
+        xs, ys = xs.cuda(), ys.cuda()
+
+        # x = torch.cat((xs, xt), dim=0)
+        x = xs
+        _, f = base_network(x)
+        # f_g_xs, f_g_xt = f.chunk(2, dim=0)
+        f_g_xs = f
+
+        classifier_loss = my_CrossEntropy(f_g_xs, ys)
+        cot_loss = marginloss(f_g_xs, ys, classes=args.class_num, alpha=1, weight=None)
+        Total_loss = classifier_loss + args.cot_weight * cot_loss
+
+        optimizer_bak.zero_grad()
+        Total_loss.backward()
+        optimizer_bak.step()
+
+        cls_acc = accuracy(f_g_xs, ys)[0]
+        # tgt_acc = accuracy(f_g_xt, yt.to('cuda'))[0]
+
+        # args.writer.add_scalar('PreTrain/cls_loss', classifier_loss, i)
+        # args.writer.add_scalar('PreTrain/d_loss', 0., i)
+        # args.writer.add_scalar('PreTrain/s_acc', cls_acc, i)
+        # args.writer.add_scalar('PreTrain/t_acc', tgt_acc, i)
+        if i % 100 == 0:
+            print('PreTrain:{}\t---cls_loss:{}\ts_acc:{}'.format(i, np.round(classifier_loss.cpu().item(), 3),
+                                                                 np.round(cls_acc.cpu().item(), 3)))
+        continue

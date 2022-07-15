@@ -64,7 +64,7 @@ def image_test(resize_size=256, crop_size=224):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-def image_classification(loader, model):
+def image_classification(loader, model, threshold=10):
     start_test = True
     with torch.no_grad():
         iter_test = iter(loader["test"])
@@ -73,21 +73,54 @@ def image_classification(loader, model):
             inputs = data[0]
             labels = data[1]
             inputs = inputs.cuda()
-            _, outputs = model(inputs)
+            feas, outputs = model(inputs)
             if start_test:
+                all_fea = feas.float().cpu()
                 all_output = outputs.float().cpu()
                 all_label = labels.float()
                 start_test = False
             else:
+                all_fea = torch.cat((all_fea, feas.float().cpu()), 0)
                 all_output = torch.cat((all_output, outputs.float().cpu()), 0)
                 all_label = torch.cat((all_label, labels.float()), 0)
-    _, predict = torch.max(all_output, 1)
-    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(all_label.size()[0])
-    #mean_ent = torch.mean(my_loss.Entropy(torch.nn.Softmax(dim=1)(all_output))).cpu().data.item()
 
-    #hist_tar = torch.nn.Softmax(dim=1)(all_output).sum(dim=0)
-    #hist_tar = hist_tar / hist_tar.sum()
-    return accuracy#, hist_tar, mean_ent
+    _, predict = torch.max(all_output, 1)
+    prob_output = nn.Softmax(dim=1)(all_output)
+    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(all_label.size()[0])
+    # mean_ent = torch.mean(my_loss.Entropy(prob_output)).cpu().data.item()
+
+    hist_tar = prob_output.sum(dim=0)
+    hist_tar = hist_tar / hist_tar.sum()
+
+    # pdb.set_trace()
+    # if distance == 'cosine':
+    ##########################
+    # all_fea = torch.cat((all_fea, torch.ones(all_fea.size(0), 1)), 1)
+    # all_fea = (all_fea.t() / torch.norm(all_fea, p=2, dim=1)).t()
+    #
+    # all_fea = all_fea.float().cpu().numpy()
+    # K = all_output.size(1)
+    # aff = all_output.float().cpu().numpy()
+    #
+    # for _ in range(2):
+    #     # pdb.set_trace()
+    #     initc = aff.transpose().dot(all_fea)
+    #     initc = initc / (1e-8 + aff.sum(axis=0)[:,None])
+    #     cls_count = np.eye(K)[predict].sum(axis=0)
+    #     labelset = np.where(cls_count>threshold)
+    #     labelset = labelset[0]
+    #     dd = cdist(all_fea, initc[labelset], 'cosine')
+    #     # dd = cdist(all_fea, initc[labelset], 'euclidean')
+    #     pred_label = dd.argmin(axis=1)
+    #     predict = labelset[pred_label]
+    #     aff = np.eye(K)[predict]
+    #
+    # # pdb.set_trace()
+    # acc = np.sum(predict == all_label.float().numpy()) / len(all_fea)
+    # log_str = 'Accuracy = {:.2f}% -> {:.2f}%'.format(accuracy * 100, acc * 100)
+    # print(log_str)
+    # exit()
+    return accuracy, hist_tar, predict, None
 
 def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -102,12 +135,14 @@ def train(args):
     dsets["test"] = p_dataset(root=args.dset_path, task=args.t_name, download=True, transform=image_test())
 
     dset_loaders = {}
+    source_labels = torch.tensor(list(zip(*(dsets["source"].samples)))[1])
+    source_label_count = np.array([np.sum(source_labels.numpy() == i) for i in range(args.class_num)])
+
     if args.balance == 0:
         dset_loaders["source"] = DataLoader(dsets["source"], batch_size=train_bs, shuffle=True, num_workers=args.worker,
                                             prefetch_factor=8,
                                             drop_last=True)
     else:
-        source_labels = torch.tensor(list(zip(*(dsets["source"].samples)))[1])
         train_batch_sampler = BalancedBatchSampler(source_labels, batch_size=train_bs)
         dset_loaders["source"] = DataLoader(dsets["source"], batch_sampler=train_batch_sampler, num_workers=args.worker,
                                             prefetch_factor=8
@@ -122,13 +157,12 @@ def train(args):
                                         prefetch_factor=8
                                         )
 
-    if args.auto_ratio == 1:
-
-        print('Dataset size -- source: {} \t target: {} \t ratio: {}'.format(len(dsets["source"]),
-                len(dsets["target"]), len(dsets["target"]) / len(dsets["source"])))
-        set_ratio = len(dsets["target"]) / len(dsets["source"])
-        args.point_mass = set_ratio
-        print('Setting point mass to: {}'.format(set_ratio))
+    # if args.auto_ratio == 1:
+        # print('Dataset size -- source: {} \t target: {} \t ratio: {}'.format(len(dsets["source"]),
+        #         len(dsets["target"]), len(dsets["target"]) / len(dsets["source"])))
+        # set_ratio = len(dsets["target"]) / len(dsets["source"])
+        # args.point_mass = set_ratio
+        # print('Setting point mass to: {}'.format(set_ratio))
 
 
     if "ResNet" in args.net:
@@ -138,7 +172,8 @@ def train(args):
             params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True,
                       'class_num': args.class_num, 'init_fc':args.init_fc, "NoRelu":args.NoRelu, "normalize":args.normalize}
         base_network = network.ResNetFc(**params)
-    
+        base_network_bak = network.ResNetFc(**params)
+
     # if "VGG" in args.net:
     #     params = {"vgg_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True, 'class_num': args.class_num}
     #     base_network = network.VGGFc(**params)
@@ -207,7 +242,14 @@ def train(args):
                             {'lr': args.lr, "weight_decay":5e-4,},
                             "lr_type": "null", "lr_param": {"lr": args.lr}
                             }
+    elif args.opt_G == 5:
+        optimizer_config = {"type":torch.optim.Adam, "optim_params":
+                            {'lr':args.lr, "weight_decay":5e-4, 'betas':(0, 0.5)},
+                            "lr_type":"inv", "lr_param":{"lr":args.lr, "gamma":0.001, "power":0.75}
+                        }
+
     optimizer = optimizer_config["type"](parameter_list,**(optimizer_config["optim_params"]))
+    optimizer_bak = optimizer_config["type"](parameter_list, **(optimizer_config["optim_params"]))
 
     param_lr = []
     for param_group in optimizer.param_groups:
@@ -219,13 +261,70 @@ def train(args):
         lr_scheduler_D = LambdaLR(optimizer_D, lambda x: args.lr_D * (1. + 0.001 * float(x)) ** (-0.75))
 
     feature_extractor = nn.Sequential(base_network.module.feature_layers, nn.Flatten(), base_network.module.bottleneck).to('cuda')
+
+    # if args.auto_ratio == 1:
+    #     source_only(base_network_bak, args.pre_train, optimizer_bak, lr_scheduler, schedule_param, dset_loaders["source"])
+
+    for i in range(args.pre_train):
+
+        optimizer_bak = lr_scheduler(optimizer_bak, i, **schedule_param)
+
+        # train one iter
+        if i % len(dset_loaders["source"]) == 0:
+            iter_source = iter(dset_loaders["source"])
+        if i % len(dset_loaders["target"]) == 0:
+            iter_target = iter(dset_loaders["target"])
+
+        xs, ys, ind_s = iter_source.next()
+        # xt, yt, ind_t = iter_target.next()
+        # xs, xt, ys = xs.cuda(), xt.cuda(), ys.cuda()
+        xs, ys = xs.cuda(), ys.cuda()
+
+        # x = torch.cat((xs, xt), dim=0)
+        x = xs
+        _, f = base_network(x)
+        # f_g_xs, f_g_xt = f.chunk(2, dim=0)
+        f_g_xs = f
+
+        classifier_loss = my_CrossEntropy(f_g_xs, ys)
+        cot_loss = marginloss(f_g_xs, ys, classes=args.class_num, alpha=1, weight=None)
+        Total_loss = classifier_loss + args.cot_weight * cot_loss
+
+        optimizer_bak.zero_grad()
+        Total_loss.backward()
+        optimizer_bak.step()
+
+        cls_acc = accuracy(f_g_xs, ys)[0]
+        # tgt_acc = accuracy(f_g_xt, yt.to('cuda'))[0]
+
+        args.writer.add_scalar('PreTrain/cls_loss', classifier_loss, i)
+        args.writer.add_scalar('PreTrain/d_loss', 0., i)
+        args.writer.add_scalar('PreTrain/s_acc', cls_acc, i)
+        # args.writer.add_scalar('PreTrain/t_acc', tgt_acc, i)
+        if i % 100 == 0:
+            # print('PreTrain:{}\t---cls_loss:{}\ts_acc:{}\tt_acc:{}'.format(i, np.round(classifier_loss.cpu().item(), 3), np.round(cls_acc.cpu().item(), 3), np.round(tgt_acc.cpu().item(), 3)))
+            print('PreTrain:{}\t---cls_loss:{}\ts_acc:{}'.format(i, np.round(classifier_loss.cpu().item(), 3),
+                                                                       np.round(cls_acc.cpu().item(), 3)))
+        continue
+
+
     for i in range(args.max_iterations + 1):
 
         if (i % args.test_interval == 0) or (i == args.max_iterations):
         # if i == 1:
             # obtain the class-level weight and evalute the current model
             base_network.train(False)
-            temp_acc = image_classification(dset_loaders, base_network)
+            print('Start testing.....')
+            temp_acc, class_weight, predict_label, acc = image_classification(dset_loaders, base_network)
+
+            # source_label_count
+            # predict_label_count = np.array([np.sum(predict_label.numpy() == i) for i in range(args.class_num)])
+            # predict_label_dis = predict_label_count / np.sum(predict_label_count)
+            # pdb.set_trace()
+            # source_label_count / np.sum(source_label_count)
+            predict_label = torch.from_numpy(predict_label).cuda()
+            print(class_weight)
+            print('Finish testing.....')
             args.writer.add_scalar('Test/t_acc', temp_acc, i // args.test_interval)
 
             # if i > -1:
@@ -255,8 +354,8 @@ def train(args):
         if i % len(dset_loaders["target"]) == 0:
             iter_target = iter(dset_loaders["target"])
 
-        xs, ys = iter_source.next()
-        xt, yt = iter_target.next()
+        xs, ys, ind_s = iter_source.next()
+        xt, yt, ind_t = iter_target.next()
         xs, xt, ys = xs.cuda(), xt.cuda(), ys.cuda()
 
 
@@ -301,9 +400,9 @@ def train(args):
                 M = torch.tensor(0.)
 
             d_loss_all = d_loss + gp_loss
-            print(
-                ' d_iter ' + str(d) + ' d_loss: ' + str(np.array(d_loss.item()).round(6)) + '\t' +
-                'gp_loss: ' + str(np.array(gp_loss.item()).round(6)) + '\t' + ' M_grad:' + str(np.array(M.item()).round(6)))
+            # print(
+            #     ' d_iter ' + str(d) + ' d_loss: ' + str(np.array(d_loss.item()).round(6)) + '\t' +
+            #     'gp_loss: ' + str(np.array(gp_loss.item()).round(6)) + '\t' + ' M_grad:' + str(np.array(M.item()).round(6)))
 
             optimizer_D.zero_grad()
             d_loss_all.backward()
@@ -340,10 +439,26 @@ def train(args):
         target_ent_whole = Entropy_whole(f_g_xt)
         classifier_loss = my_CrossEntropy(f_g_xs, ys)
 
+        if args.cot == 0:
+            cot_loss = torch.tensor(0.).cuda()
+        elif args.cot == 1:
+            cot_loss = marginloss(f_g_xs, ys, classes=args.class_num, alpha=1, weight=None)
+            # pdb.set_trace()
+        else:
+            cot_loss = marginloss(f_g_xs, ys, classes=args.class_num, alpha=1, weight=class_weight.cuda())
+
+        if args.t_cls == 1:
+            pred = predict_label[ind_t]
+            t_cls_loss = nn.CrossEntropyLoss()(f_g_xt, pred)
+        else:
+            t_cls_loss = torch.tensor(0.).cuda()
+
+        print('Training:\t step:{}\tclassifier:{}\ttransfer_loss:{}\t'.format(i, classifier_loss.item(), transfer_loss.item()))
         total_loss = classifier_loss * args.cls_weight + transfer_loss * args.trade_off + \
                      args.entropy * target_ent + args.entropy_s * Entropy(f_g_xs).mean() + \
-                     args.entropy_w * target_ent_whole
-            
+                     args.entropy_w * target_ent_whole + args.cot_weight * cot_loss + \
+                     args.t_cls_weight * t_cls_loss
+
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -398,6 +513,12 @@ if __name__ == "__main__":
     parser.add_argument('--entropy_s', type=float, default=0., help='entropy weight')
     parser.add_argument('--pre_process', type=int, default=0, help='')
     parser.add_argument('--init_fc', type=int, default=0, help='')
+    parser.add_argument('--pre_train', type=int, default=0, help='')
+    parser.add_argument('--cot', type=int, default=0, help='0: no, 1:uniform weight, 2: use weight')
+    parser.add_argument('--cot_weight', type=float, default=0., help='')
+    parser.add_argument('--t_cls', type=int, default=0, help='')
+    parser.add_argument('--t_cls_weight', type=float, default=0., help='')
+
 
     parser.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
 
@@ -415,6 +536,7 @@ if __name__ == "__main__":
         args.s_name = names[args.s]
         args.t_name = names[args.t]
         args.color_label = False
+        # args.pre_train = 500
 
     if args.dset == 'VisDA2017':
         names = ['Synthetic', 'Real']
@@ -430,6 +552,7 @@ if __name__ == "__main__":
         args.s_name = names[args.s]
         args.t_name = names[args.t]
         args.color_label = True
+        # args.pre_train = 0
 
     if args.dset == 'ImageNetCaltech':
         names = ['I', 'C']
@@ -441,7 +564,7 @@ if __name__ == "__main__":
         args.balance = 0
         args.s_name = names[args.s]
         args.t_name = names[args.t]
-
+        # args.pre_train = 0
         # args.max_iterations = 40000
         # args.test_interval = 4000
         # args.lr=1e-3
@@ -459,12 +582,13 @@ if __name__ == "__main__":
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
-    setting_name = '{}_WO_{}_lrD_{}_lrG_{}_WL_{}_ItD_{}_PM_{}_Wcls_{}_opt_G{}_ent_{}_entw_{}_bs_{}' \
-                   '_r_{}_Dent_{}_smo_{}_cats_{}_NoR_{}_norm_{}_init_{}_inc_{}_seed_{}'.format(
+    setting_name = '{}_WO_{}_lrDG_{}_{}_WL_{}_ItD_{}_PM_{}_cls_{}_opG{}_ent_{}_bs_{}' \
+                   '_r_{}_smo_{}_cats_{}_NoR_{}_norm_{}_Pre_{}_c{}_cw_{}_tcls_{}_t_clsw_{}_inc_{}_seed_{}'.format(
                     args.dset, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
-                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy, args.entropy_w,
-                    args.batch_size, args.pm_ratio, args.detach_ent, args.label_smooth, args.cat_smooth,
-                    args.NoRelu, args.normalize, args.init_fc, args.mass_inc, args.seed)
+                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy,
+                    args.batch_size, args.pm_ratio, args.label_smooth, args.cat_smooth,
+                    args.NoRelu, args.normalize, args.pre_train, args.cot, args.cot_weight,
+                    args.t_cls, args.t_cls_weight, args.mass_inc, args.seed)
 
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)
