@@ -1,5 +1,5 @@
 import pdb
-
+from torch.autograd import grad
 is_torchvision_installed = True
 try:
     import torchvision
@@ -28,6 +28,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as col
 import os
+from GAN_model.util import cal_dloss, Concate_w, Entropy, cal_dloss_inc, Entropy_whole
 
 norm = plt.Normalize(vmin=0., vmax=1.)
 
@@ -94,20 +95,21 @@ class CrossEntropyLabelSmooth(nn.Module):
         epsilon (float): weight.
     """
 
-    def __init__(self, num_classes, epsilon=0.1, use_gpu=True, reduction=True):
+    def __init__(self, num_classes, epsilon=0.1, use_gpu=True):
         super(CrossEntropyLabelSmooth, self).__init__()
         self.num_classes = num_classes
         self.epsilon = epsilon
         self.use_gpu = use_gpu
-        self.reduction = reduction
+        # self.reduction = reduction
         self.logsoftmax = nn.LogSoftmax(dim=1)
+        # self.weight = weight
 
     def smooth(self, targets):
         targets = torch.zeros((targets.shape[0], self.num_classes)).scatter_(1, targets.unsqueeze(1).cpu(), 1).cuda()
         smoothed_targets = (1 - self.epsilon) * targets + self.epsilon / self.num_classes
         return smoothed_targets
 
-    def forward(self, inputs, targets):
+    def forward(self, inputs, targets, weight=None, norm_type=2):
         """
         Args:
             inputs: prediction matrix (before softmax) with shape (batch_size, num_classes)
@@ -121,10 +123,26 @@ class CrossEntropyLabelSmooth(nn.Module):
         # targets = (1 - self.epsilon) * targets + self.epsilon / self.num_classes
         # pdb.set_trace()
         loss = (- smoothed_targets * log_probs).sum(dim=1)
-        if self.reduction:
+
+        if weight is None:
             return loss.mean()
-        else:
-            return loss
+
+        if norm_type == 1:
+            weight_ = weight
+        elif norm_type == 2:
+            # pdb.set_trace()
+            weight_ = weight/(torch.sum(weight)+1e-5)
+        elif norm_type == 3:
+            weight_ = weight * self.num_classes / inputs.shape[0]
+        elif norm_type == 4:
+            weight_ = weight / torch.max(weight) / inputs.shape[0]
+        elif norm_type == 5:
+            weight_ = weight / inputs.shape[0]
+        return torch.sum(weight_*loss)
+        # elif norm_type ==1:
+        #     weight_ = torch.nn.functional.relu(weight - 1e-5)
+        #     return torch.sum(weight * loss) / (torch.sum(weight) + 1e-5)
+
 
 class InfiniteSliceIterator:
     def __init__(self, array, class_):
@@ -202,23 +220,92 @@ def collect_feature(data_loader: DataLoader, feature_extractor: nn.Module,
     feature_extractor.eval()
     all_features = []
     all_target = []
+    all_logit = []
     with torch.no_grad():
         for i, (images, target, index) in enumerate(tqdm.tqdm(data_loader)):
             images = images.to(device)
-            feature = feature_extractor(images).cpu()
-            # Fea = feature_extractor(images)
-            # F = Fea.view(Fea.shape[0], -1)
-            # feature = bottleneck(F).cpu()
-            # pdb.set_trace()
+            feature, logit = feature_extractor(images)
+            feature = feature.cpu()
+            logit = logit.cpu()
             all_features.append(feature)
             all_target.append(target)
+            all_logit.append(logit)
             if max_num_features is not None and i * feature.shape[0] >= max_num_features:
                 break
-    return torch.cat(all_features, dim=0), torch.cat(all_target)
+    return torch.cat(all_features, dim=0), torch.cat(all_target), torch.cat(all_logit)
 
+
+# norm_extract(source_feature, target_feature, domain_D, args.d_weight_label, my_CrossEntropy,
+#              args.label_smooth == 1 and args.cat_smooth == 1)
+
+
+def norm_extract(source_feature, target_feature, source_label, target_label, train_bs,
+                 source_logit, target_logit, domain_D, d_weight_label, my_CrossEntropy, smooth):
+
+    if d_weight_label < 10.0:
+        if smooth == 1:
+            ys_onehot = my_CrossEntropy.smooth(source_label)
+        else:
+            ys_onehot = F.one_hot(source_label, num_classes=my_CrossEntropy.num_classes).float()
+
+        yt_predict = F.softmax(target_logit, -1)
+        cor_s_d = Concate_w(source_feature.detach(), ys_onehot, weight=d_weight_label)
+        cor_t_d = Concate_w(target_feature.detach(), yt_predict.detach(), weight=d_weight_label)
+    elif d_weight_label > 10.0 and d_weight_label < 20.0:
+        yt_predict = F.softmax(target_logit, -1)
+        ys_predict = F.softmax(source_logit, -1)
+        cor_s_d = Concate_w(source_feature.detach(), ys_predict.detach(), weight=d_weight_label - 10.0)
+        cor_t_d = Concate_w(target_feature.detach(), yt_predict.detach(), weight=d_weight_label - 10.0)
+    elif d_weight_label > 20.0:
+        cor_s_d = Concate_w(source_feature.detach(), source_logit.detach(), weight=d_weight_label - 20.0)
+        cor_t_d = Concate_w(target_feature.detach(), target_logit.detach(), weight=d_weight_label - 20.0)
+
+    # potential_r = domain_D(cor_s_d)
+    # potential_f = domain_D(cor_t_d)
+
+    b_r = cor_s_d.shape[0] // train_bs
+    r_norm = []
+    domain_D_c = domain_D.to('cpu')
+    for i in range(b_r + 1):
+        if (i + 1) * train_bs <= cor_s_d.shape[0]:
+            batch = cor_s_d[i * train_bs : (i + 1) * train_bs]
+        else:
+            batch = cor_s_d[i * train_bs: ]
+
+        # batch = batch.to('cuda')
+        batch.requires_grad_(True)
+
+        potential_r = domain_D_c(batch)
+        gradients = grad(outputs=potential_r, inputs=batch,
+                         grad_outputs=torch.ones(potential_r.size()).contiguous())[0]
+        # pdb.set_trace()
+        r_norm.append(gradients.norm(2, dim=1).detach().cpu())
+    source_norm = torch.cat(r_norm)
+
+    b_f = cor_t_d.shape[0] // train_bs
+    f_norm = []
+    for i in range(b_f + 1):
+        if (i + 1) * train_bs <= cor_t_d.shape[0]:
+            batch = cor_t_d[i * train_bs : (i + 1) * train_bs]
+        else:
+            batch = cor_t_d[i * train_bs: ]
+
+        # batch = batch.to('cuda')
+        batch.requires_grad_(True)
+
+        potential_f = domain_D_c(batch)
+        gradients = grad(outputs=potential_f, inputs=batch,
+                         grad_outputs=torch.ones(potential_f.size()).contiguous())[0]
+        # pdb.set_trace()
+        f_norm.append(gradients.norm(2, dim=1).detach().cpu())
+    target_norm = torch.cat(f_norm)
+
+    # pdb.set_trace()
+    return source_norm, target_norm
 
 def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
-              source_label, target_label, color_label=False, source_color='r', target_color='b',
+              source_label, target_label, source_norm, target_norm,
+              color_label=False, source_color='r', target_color='b',
               logpath=None, name=1):
     """
     Visualize features from different domains using t-SNE.
@@ -293,6 +380,11 @@ def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
     np.save(source_label_cut_filename, source_label_cut)
     np.save(target_label_filename, target_label)
 
+    plt.figure(figsize=(10, 10))
+    plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=torch.cat([source_norm, target_norm]).numpy(), cmap=plt.cm.viridis, s=3, alpha=0.1)
+    norm_filename = os.path.join(logpath, '{}_norm.png'.format(name))
+
+    plt.savefig(norm_filename)
 
 def obtain_label(loader, feat_ext, fc, distance='cosine', threshold=0.3):
     start_test = True
@@ -374,45 +466,34 @@ def marginloss(yHat, y, classes=65, alpha=1, weight=None):
 
     return loss
 
-
-def source_only():
-    for i in range(args.pre_train):
-
-        optimizer_bak = lr_scheduler(optimizer_bak, i, **schedule_param)
-
+def source_only(network, step, optimizer, lr_scheduler, schedule_param, dset_loaders, loss, cot_weight):
+    for i in range(step):
+        optimizer_bak = lr_scheduler(optimizer, i, **schedule_param)
+        # pdb.set_trace()
         # train one iter
         if i % len(dset_loaders["source"]) == 0:
             iter_source = iter(dset_loaders["source"])
-        # if i % len(dset_loaders["test"]) == 0:
-        # 	iter_target = iter(dset_loaders["test"])
+
 
         xs, ys, ind_s = iter_source.next()
-        # xt, yt, ind_t = iter_target.next()
-        # xs, xt, ys = xs.cuda(), xt.cuda(), ys.cuda()
         xs, ys = xs.cuda(), ys.cuda()
 
-        # x = torch.cat((xs, xt), dim=0)
-        x = xs
-        _, f = base_network(x)
-        # f_g_xs, f_g_xt = f.chunk(2, dim=0)
-        f_g_xs = f
-
-        classifier_loss = my_CrossEntropy(f_g_xs, ys)
-        cot_loss = marginloss(f_g_xs, ys, classes=args.class_num, alpha=1, weight=None)
-        Total_loss = classifier_loss + args.cot_weight * cot_loss
+        _, f = network(xs)
+        # pdb.set_trace()
+        classifier_loss = loss(f, ys)
+        #############
+        # cot_loss = marginloss(f, ys, classes=network.class_num, alpha=1, weight=None)
+        #############
+        cot_loss = torch.tensor(0.).cuda()
+        #############
+        Total_loss = classifier_loss + cot_weight * cot_loss
 
         optimizer_bak.zero_grad()
         Total_loss.backward()
         optimizer_bak.step()
 
-        cls_acc = accuracy(f_g_xs, ys)[0]
-        # tgt_acc = accuracy(f_g_xt, yt.to('cuda'))[0]
+        cls_acc = accuracy(f, ys)[0]
 
-        # args.writer.add_scalar('PreTrain/cls_loss', classifier_loss, i)
-        # args.writer.add_scalar('PreTrain/d_loss', 0., i)
-        # args.writer.add_scalar('PreTrain/s_acc', cls_acc, i)
-        # args.writer.add_scalar('PreTrain/t_acc', tgt_acc, i)
         if i % 100 == 0:
             print('PreTrain:{}\t---cls_loss:{}\ts_acc:{}'.format(i, np.round(classifier_loss.cpu().item(), 3),
                                                                  np.round(cls_acc.cpu().item(), 3)))
-        continue

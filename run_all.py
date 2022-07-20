@@ -45,6 +45,7 @@ args_ps.add_argument('--cot', type=int, default=0, help='0: no, 1:uniform weight
 args_ps.add_argument('--cot_weight', type=float, default=0., help='')
 args_ps.add_argument('--t_cls', type=int, default=0, help='')
 args_ps.add_argument('--t_cls_weight', type=float, default=0., help='')
+args_ps.add_argument('--clsw', type=int, default=0, help='')
 
 args_ps.add_argument('--task_list', default='0', type=str)
 
@@ -98,7 +99,7 @@ for task in task_list:
 		                        '--mass_inc', '--seed', '--auto_ratio', '--detach_ent',
 		                        '--label_smooth', '--cat_smooth', '--NoRelu', '--normalize',
 		                        '--entropy_w', '--pre_train', '--cot', '--cot_weight',
-		                        '--t_cls', '--t_cls_weight'],
+		                        '--t_cls', '--t_cls_weight', '--clsw'],
 			[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
 			 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
 			 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight,
@@ -107,4 +108,4 @@ for task in task_list:
 			 args.mass_inc, s, args.auto_ratio, args.detach_ent,
 			 args.label_smooth, args.cat_smooth, args.NoRelu, args.normalize,
 			 args.entropy_w, args.pre_train, args.cot, args.cot_weight,
-			 args.t_cls, args.t_cls_weight])
+			 args.t_cls, args.t_cls_weight, args.clsw])
