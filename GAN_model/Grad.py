@@ -18,6 +18,8 @@ class Grad_Penalty:
 						 create_graph=True, retain_graph=True)
 
 		grad_all = torch.cat(gradients, 0)
+		source_norm = grad_all.norm(2, dim=1)[:All_points[0].shape[0]]
+		all_norm = grad_all.norm(2, dim=1)
 		# pdb.set_trace()
 		gradient_penalty = (torch.nn.functional.relu(grad_all.norm(2, dim=1) - self.gamma) ** 2).mean() * self.lambdaGP
 
@@ -25,7 +27,7 @@ class Grad_Penalty:
 			# grad_norm = grad_all.norm(2, dim=1, keepdim=True)
 			M_grad = torch.max(grad_all.norm(2, dim=1))
 
-		return gradient_penalty, M_grad
+		return gradient_penalty, M_grad, source_norm.detach(), all_norm.detach(), grad_all
 
 
 

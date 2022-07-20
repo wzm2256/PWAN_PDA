@@ -51,6 +51,7 @@ class ResNetFc(nn.Module):
     self.new_cls = new_cls
     self.normalize = normalize
     self.NoRelu = NoRelu
+    self.class_num = class_num
     if new_cls:
         if self.use_bottleneck:
             if NoRelu == 1 or NoRelu == 2:
