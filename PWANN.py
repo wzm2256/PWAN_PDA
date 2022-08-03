@@ -176,7 +176,7 @@ def train(args):
         if args.dset == 'ImageNetCaltech__':
             params = {"resnet_name": args.net, "use_bottleneck": False, "new_cls": False, 'class_num': args.class_num}
         else:
-            params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":256, "new_cls":True,
+            params = {"resnet_name":args.net, "use_bottleneck":True, "bottleneck_dim":args.bottle_dim, "new_cls":True,
                       'class_num': args.class_num, 'init_fc':args.init_fc, "NoRelu":args.NoRelu, "normalize":args.normalize}
         base_network = network.ResNetFc(**params)
         base_network_tmp = network.ResNetFc(**params)
@@ -315,12 +315,25 @@ def train(args):
             # obtain the class-level weight and evalute the current model
             base_network.train(False)
             print('Start testing.....')
-            temp_acc, class_weight, predict_label, acc = image_classification(dset_loaders, base_network)
+            if i == 0:
+                if args.skip_first == 0:
+                    temp_acc, class_weight, predict_label, acc = image_classification(dset_loaders, base_network)
+                elif args.skip_first == 1:
+                    # use pretrained estimated class weight
+                    temp_acc, _, _, acc = image_classification(dset_loaders, base_network)
+                elif args.skip_first == 2:
+                    # use uniformed class weight and predict label
+                    temp_acc, _, _, acc = image_classification(dset_loaders, base_network)
+                    class_weight = torch.ones(args.class_num) / args.class_num
 
+            else:
+                temp_acc, class_weight, predict_label, acc = image_classification(dset_loaders, base_network)
             # source_label_count
             predict_label_count = np.array([np.sum(predict_label.numpy() == i) for i in range(args.class_num)])
             predict_label_dis = torch.from_numpy(predict_label_count / np.sum(predict_label_count)).to('cuda')
 
+            if i == 0 and args.skip_first == 2:
+                predict_label_dis = class_weight
             # print(class_weight)
             print('Finish testing.....')
             args.writer.add_scalar('Test/t_acc', temp_acc, i // args.test_interval)
@@ -334,10 +347,12 @@ def train(args):
                 source_feature, source_label, source_logit = collect_feature(dset_loaders["source"], base_network, device, 10000)
                 target_feature, target_label, target_logit = collect_feature(dset_loaders["target"], base_network, device, 10000)
 
-                source_norm, target_norm = norm_extract(source_feature, target_feature, source_label, target_label, train_bs, source_logit, target_logit,
+                source_norm, target_norm, cor_s, cor_t = norm_extract(source_feature, target_feature, source_label, target_label, train_bs, source_logit, target_logit,
                              domain_D, args.d_weight_label, my_CrossEntropy, args.label_smooth == 1 and args.cat_smooth == 1)
-                visualize(source_feature, target_feature, source_label, target_label, source_norm, target_norm,
-                              color_label=args.color_label, logpath=args.Log_path, name=i)
+                visualize(cor_s, cor_t, source_label, target_label, source_norm, target_norm,
+                          color_label=args.color_label, logpath=args.Log_path, name=i)
+                # visualize(source_feature, target_feature, source_label, target_label, source_norm, target_norm,
+                #                       color_label=args.color_label, logpath=args.Log_path, name=i)
                     # print("Saving t-SNE to", tSNE_filename)
 
                 exit(0)
@@ -429,8 +444,10 @@ def train(args):
             cor_s_g = Concate_w(g_xs, f_g_xs, weight=args.d_weight_label - 20.0)
             cor_t_g = Concate_w(g_xt, f_g_xt, weight=args.d_weight_label - 20.0)
 
-
-        potential_r_g = domain_D(cor_s_g)
+        if args.detach_s == 1:
+            potential_r_g = domain_D(cor_s_g).detach()
+        else:
+            potential_r_g = domain_D(cor_s_g)
         potential_f_g = domain_D(cor_t_g)
 
         if args.mass_inc == 1:
@@ -540,6 +557,9 @@ if __name__ == "__main__":
     parser.add_argument('--NoRelu', type=int, default=0, help="")
     parser.add_argument('--normalize', type=int, default=0, help="")
     parser.add_argument('--entropy_w', type=float, default=0, help="")
+    parser.add_argument('--detach_s', type=int, default=0, help="")
+    parser.add_argument('--skip_first', type=int, default=0, help="")
+
 
     ########
     parser.add_argument('--mass_inc', default=0, type=int)
@@ -566,6 +586,8 @@ if __name__ == "__main__":
     parser.add_argument('--t_cls', type=int, default=0, help='')
     parser.add_argument('--t_cls_weight', type=float, default=0., help='')
     parser.add_argument('--clsw', type=int, default=0, help='')
+    parser.add_argument('--bottle_dim', type=int, default=256, help='')
+
 
     parser.add_argument('--pm_ratio', type=float, default=1., help='point mass decrease ratio at the end of the training.')
 
@@ -575,7 +597,7 @@ if __name__ == "__main__":
         names = ['Ar', 'Cl', 'Pr', 'Rw']
         k = 25
         args.class_num = 65
-        args.test_interval = 500
+        # args.test_interval = 500
         if args.batch_size == 65:
             args.balance = 1
         else:
@@ -629,14 +651,16 @@ if __name__ == "__main__":
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
-    setting_name = '{}_WO_{}_lrDG_{}_{}_WL_{}_ItD_{}_PM_{}_cls_{}_opG{}_ent_{}_bs_{}' \
-                   '_r_{}_smo_{}_cats_{}_NoR_{}_norm_{}_Pre_{}_c_{}_cw_{}_tcls_{}_t_clsw_{}_clsw_{}_auto_{}_inc_{}_seed_{}'.format(
-                    args.dset, args.trade_off, args.lr_D, args.lr, args.d_weight_label,
-                    args.d_iter, args.point_mass, args.cls_weight, args.opt_G, args.entropy,
+    setting_name = '{}_WO_{}_h_{}_WL_{}_ItD_{}_PM_{}_cls_{}_ent_{}_bs_{}' \
+                   '_r_{}_smo_{}_cats_{}_NoR_{}_norm_{}_Pre_{}_c_{}_cw_{}_clsw_{}_auto_{}_ti{}_skip_{}_inc_{}_seed_{}'.format(
+                    args.dset, args.trade_off, args.d_hidden, args.d_weight_label,
+                    args.d_iter, args.point_mass, args.cls_weight, args.entropy,
                     args.batch_size, args.pm_ratio, args.label_smooth, args.cat_smooth,
                     args.NoRelu, args.normalize, args.pre_train, args.cot, args.cot_weight,
-                    args.t_cls, args.t_cls_weight, args.clsw, args.auto_ratio, args.mass_inc, args.seed)
+                    args.clsw, args.auto_ratio, args.test_interval, args.skip_first,
+                    args.mass_inc, args.seed)
 
+    print(setting_name)
     task_name = args.name
     args.Log_path = os.path.join('LOG', setting_name, task_name)
     if not os.path.isdir(args.Log_path):

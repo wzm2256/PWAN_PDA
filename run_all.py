@@ -32,7 +32,7 @@ args_ps.add_argument('--max_iterations', type=int, default=5000, help="max itera
 args_ps.add_argument('--mass_inc', default=0, type=int)
 args_ps.add_argument('--seed', default='0', type=str)
 args_ps.add_argument('--entropy_w', type=float, default=0, help="")
-
+args_ps.add_argument('--detach_s', type=int, default=0, help="")
 
 args_ps.add_argument('--auto_ratio', type=int, default=0, help="")
 args_ps.add_argument('--detach_ent', type=int, default=0, help="")
@@ -46,6 +46,9 @@ args_ps.add_argument('--cot_weight', type=float, default=0., help='')
 args_ps.add_argument('--t_cls', type=int, default=0, help='')
 args_ps.add_argument('--t_cls_weight', type=float, default=0., help='')
 args_ps.add_argument('--clsw', type=int, default=0, help='')
+args_ps.add_argument('--bottle_dim', type=int, default=256, help='')
+args_ps.add_argument('--test_interval', type=int, default=500, help="interval of two continuous test phase")
+args_ps.add_argument('--skip_first', type=int, default=0, help="")
 
 args_ps.add_argument('--task_list', default='0', type=str)
 
@@ -88,9 +91,9 @@ seed_list = [int(i) for i in args.seed.strip().split(',')]
 
 # prepare_data.OfficeHome(root='data/office_home/images/')
 
-for task in task_list:
-	st = ST[task]
-	for s in seed_list:
+for s in seed_list:
+	for task in task_list:
+		st = ST[task]
 		run(1, ['--dset', '--s', '--t', '--max_iterations', '--batch_size', '--worker', '--d_leaky',
 		                         '--point_mass', '--trade_off', '--d_iter', '--d_norm',
 		                         '--d_hidden', '--lr_D', '--d_weight_label', '--cls_weight',
@@ -99,7 +102,8 @@ for task in task_list:
 		                        '--mass_inc', '--seed', '--auto_ratio', '--detach_ent',
 		                        '--label_smooth', '--cat_smooth', '--NoRelu', '--normalize',
 		                        '--entropy_w', '--pre_train', '--cot', '--cot_weight',
-		                        '--t_cls', '--t_cls_weight', '--clsw'],
+		                        '--t_cls', '--t_cls_weight', '--clsw', '--bottle_dim',
+		                        '--test_interval', '--detach_s', '--skip_first'],
 			[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
 			 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
 			 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight,
@@ -108,4 +112,5 @@ for task in task_list:
 			 args.mass_inc, s, args.auto_ratio, args.detach_ent,
 			 args.label_smooth, args.cat_smooth, args.NoRelu, args.normalize,
 			 args.entropy_w, args.pre_train, args.cot, args.cot_weight,
-			 args.t_cls, args.t_cls_weight, args.clsw])
+			 args.t_cls, args.t_cls_weight, args.clsw, args.bottle_dim,
+			 args.test_interval, args.detach_s, args.skip_first])

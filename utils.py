@@ -301,7 +301,7 @@ def norm_extract(source_feature, target_feature, source_label, target_label, tra
     target_norm = torch.cat(f_norm)
 
     # pdb.set_trace()
-    return source_norm, target_norm
+    return source_norm, target_norm, cor_s_d, cor_t_d
 
 def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
               source_label, target_label, source_norm, target_norm,
