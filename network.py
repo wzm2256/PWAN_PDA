@@ -32,7 +32,7 @@ def grl_hook(coeff):
 
 class ResNetFc(nn.Module):
   def __init__(self, resnet_name, use_bottleneck=True, bottleneck_dim=256, new_cls=False, class_num=1000,
-               init_fc=0, NoRelu=0, normalize=0):
+               init_fc=0, NoRelu=0, normalize=0, leaky=0.0):
     super(ResNetFc, self).__init__()
     model_resnet = resnet_dict[resnet_name](pretrained=True)
     self.conv1 = model_resnet.conv1
@@ -58,11 +58,15 @@ class ResNetFc(nn.Module):
                 self.bottleneck = nn.Sequential(
                     nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
                     nn.BatchNorm1d(bottleneck_dim))
+            elif NoRelu == 3:
+                self.bottleneck = nn.Sequential(
+                    nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
+                    )
             else:
                 self.bottleneck = nn.Sequential(
                     nn.Linear(model_resnet.fc.in_features, bottleneck_dim),
                     nn.BatchNorm1d(bottleneck_dim),
-                    nn.ReLU())
+                    nn.LeakyReLU(negative_slope=leaky))
             if self.normalize == 1:
                 self.fc = torch.nn.utils.weight_norm(nn.Linear(bottleneck_dim, class_num))
             elif self.normalize == 3:
@@ -91,7 +95,7 @@ class ResNetFc(nn.Module):
         x = self.bottleneck(x)
 
     if self.normalize == 2:
-        x = 10 * torch.nn.functional.normalize(x, dim=1)
+        x = 20 * torch.nn.functional.normalize(x, dim=1)
 
     if self.NoRelu == 2:
         y = self.fc(nn.functional.relu(x))

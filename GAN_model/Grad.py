@@ -29,6 +29,36 @@ class Grad_Penalty:
 
 		return gradient_penalty, M_grad, source_norm.detach(), all_norm.detach(), grad_all
 
+class Grad_Penalty_w:
+
+	def __init__(self, lambdaGP, gamma=1, device=torch.device('cpu'), ):
+		self.lambdaGP = lambdaGP
+		self.gamma = gamma
+		self.device = device
+		# self.point_mass = point_mass
+
+	def __call__(self, loss, All_points, ratio, type=1):
+
+		bs = All_points[0].shape[0]
+		gradients = grad(outputs=loss, inputs=[i.contiguous() for i in All_points],
+						 grad_outputs=torch.ones(loss.size()).to(self.device).contiguous(),
+						 create_graph=True, retain_graph=True)
+
+		if type == 1:
+			grad_all = torch.cat([gradients[0] * ratio, gradients[1]], 0)
+		elif type == 2:
+			grad_all = torch.cat([gradients[0] * ratio * bs, gradients[1] * bs], 0)
+
+		source_norm = grad_all.norm(2, dim=1)[:All_points[0].shape[0]]
+		all_norm = grad_all.norm(2, dim=1)
+		# pdb.set_trace()
+		gradient_penalty = (torch.nn.functional.relu(grad_all.norm(2, dim=1) - self.gamma) ** 2).mean() * self.lambdaGP
+
+		with torch.no_grad():
+			# grad_norm = grad_all.norm(2, dim=1, keepdim=True)
+			M_grad = torch.max(grad_all.norm(2, dim=1))
+
+		return gradient_penalty, M_grad, source_norm.detach(), all_norm.detach(), grad_all
 
 
 def cal_dloss(potential1, potential2, point_mass):

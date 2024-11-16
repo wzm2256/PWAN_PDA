@@ -249,7 +249,8 @@ def norm_extract(source_feature, target_feature, source_label, target_label, tra
             ys_onehot = F.one_hot(source_label, num_classes=my_CrossEntropy.num_classes).float()
 
         yt_predict = F.softmax(target_logit, -1)
-        cor_s_d = Concate_w(source_feature.detach(), ys_onehot, weight=d_weight_label)
+        # pdb.set_trace()
+        cor_s_d = Concate_w(source_feature.detach(), ys_onehot.to('cpu'), weight=d_weight_label)
         cor_t_d = Concate_w(target_feature.detach(), yt_predict.detach(), weight=d_weight_label)
     elif d_weight_label > 10.0 and d_weight_label < 20.0:
         yt_predict = F.softmax(target_logit, -1)
@@ -265,7 +266,7 @@ def norm_extract(source_feature, target_feature, source_label, target_label, tra
 
     b_r = cor_s_d.shape[0] // train_bs
     r_norm = []
-    domain_D_c = domain_D.to('cpu')
+    domain_D.to('cpu')
     for i in range(b_r + 1):
         if (i + 1) * train_bs <= cor_s_d.shape[0]:
             batch = cor_s_d[i * train_bs : (i + 1) * train_bs]
@@ -275,7 +276,7 @@ def norm_extract(source_feature, target_feature, source_label, target_label, tra
         # batch = batch.to('cuda')
         batch.requires_grad_(True)
 
-        potential_r = domain_D_c(batch)
+        potential_r = domain_D(batch)
         gradients = grad(outputs=potential_r, inputs=batch,
                          grad_outputs=torch.ones(potential_r.size()).contiguous())[0]
         # pdb.set_trace()
@@ -293,18 +294,19 @@ def norm_extract(source_feature, target_feature, source_label, target_label, tra
         # batch = batch.to('cuda')
         batch.requires_grad_(True)
 
-        potential_f = domain_D_c(batch)
+        potential_f = domain_D(batch)
         gradients = grad(outputs=potential_f, inputs=batch,
                          grad_outputs=torch.ones(potential_f.size()).contiguous())[0]
         # pdb.set_trace()
         f_norm.append(gradients.norm(2, dim=1).detach().cpu())
     target_norm = torch.cat(f_norm)
 
+    domain_D.to('cuda')
     # pdb.set_trace()
     return source_norm, target_norm, cor_s_d, cor_t_d
 
 def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
-              source_label, target_label, source_norm, target_norm,
+              source_label, target_label, source_norm, target_norm, source_logit, target_logit,
               color_label=False, source_color='r', target_color='b',
               logpath=None, name=1):
     """
@@ -346,9 +348,9 @@ def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
         plt.scatter(X_tsne[keep_index_source, 0], X_tsne[keep_index_source, 1], c=source_label_cut / 10, cmap=plt.cm.tab20, norm=norm, s=10, alpha=0.8, marker='s')
         plt.scatter(X_tsne[index_target, 0], X_tsne[index_target, 1], c=target_label / 10 + 0.051, cmap=plt.cm.tab20, norm=norm, s=10, alpha=0.8, marker='o')
     else:
-        plt.scatter(X_tsne[discard_index_source, 0], X_tsne[discard_index_source, 1], c='gray', s=10, alpha=0.8, marker='s')
-        plt.scatter(X_tsne[keep_index_source, 0], X_tsne[keep_index_source, 1], c=source_color, s=10, alpha=0.8, marker='s')
-        plt.scatter(X_tsne[index_target, 0], X_tsne[index_target, 1], c=target_color, s=10, alpha=0.8, marker='o')
+        plt.scatter(X_tsne[discard_index_source, 0], X_tsne[discard_index_source, 1], c='gray', s=10, alpha=0.3, marker='s')
+        plt.scatter(X_tsne[keep_index_source, 0], X_tsne[keep_index_source, 1], c=source_color, s=10, alpha=0.3, marker='s')
+        plt.scatter(X_tsne[index_target, 0], X_tsne[index_target, 1], c=target_color, s=10, alpha=0.3, marker='o')
 
 
 
@@ -368,6 +370,11 @@ def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
     index_target_filename = os.path.join(logpath, '{}_index_target.npy'.format(name))
     source_label_cut_filename = os.path.join(logpath, '{}_source_label_cut.npy'.format(name))
     target_label_filename = os.path.join(logpath, '{}_target_label.npy'.format(name))
+    source_label_full_filename = os.path.join(logpath, '{}_source_label_full.npy'.format(name))
+    source_label_predict_filename = os.path.join(logpath, '{}_source_label_predict.npy'.format(name))
+    target_label_predict_filename = os.path.join(logpath, '{}_target_label_predict.npy'.format(name))
+    source_norm_filename = os.path.join(logpath, '{}_source_norm.npy'.format(name))
+    target_norm_filename = os.path.join(logpath, '{}_target_norm.npy'.format(name))
 
 
     plt.savefig(tSNE_filename)
@@ -379,6 +386,13 @@ def visualize(source_feature: torch.Tensor, target_feature: torch.Tensor,
     np.save(index_target_filename, index_target)
     np.save(source_label_cut_filename, source_label_cut)
     np.save(target_label_filename, target_label)
+    np.save(target_label_predict_filename, target_logit)
+    np.save(source_label_full_filename, source_label)
+    np.save(source_label_predict_filename, source_logit)
+
+    np.save(source_norm_filename, source_norm.numpy())
+    np.save(target_norm_filename, target_norm.numpy())
+
 
     plt.figure(figsize=(10, 10))
     plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=torch.cat([source_norm, target_norm]).numpy(), cmap=plt.cm.viridis, s=3, alpha=0.1)

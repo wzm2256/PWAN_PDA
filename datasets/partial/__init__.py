@@ -7,11 +7,12 @@ from ..visda2017 import VisDA2017
 from ..officecaltech import OfficeCaltech
 from .imagenet_caltech import ImageNetCaltech
 from .caltech_imagenet import CaltechImageNet
+from ..domainnet import DomainNet
 # from common.vision.datasets.partial.imagenet_caltech import ImageNetCaltech
 from typing import Sequence, ClassVar
 
 
-__all__ = ['Office31', 'OfficeHome', "VisDA2017", "CaltechImageNet", "ImageNetCaltech"]
+__all__ = ['Office31', 'OfficeHome', "VisDA2017", "CaltechImageNet", "ImageNetCaltech", "DomainNet"]
 
 
 def partial(dataset_class: ClassVar, partial_classes: Sequence[str]) -> ClassVar:
@@ -55,7 +56,7 @@ def partial(dataset_class: ClassVar, partial_classes: Sequence[str]) -> ClassVar
     return PartialDataset
 
 
-def default_partial(dataset_class: ClassVar) -> ClassVar:
+def default_partial(dataset_class: ClassVar, keep_num=0) -> ClassVar:
     """
     Default partial used in some paper.
 
@@ -69,9 +70,20 @@ def default_partial(dataset_class: ClassVar) -> ClassVar:
     if dataset_class == Office31:
         kept_classes = OfficeCaltech.CLASSES
     elif dataset_class == OfficeHome:
-        kept_classes = sorted(OfficeHome.CLASSES)[:25]
+        if keep_num == 0:
+            kept_classes = sorted(OfficeHome.CLASSES)[:25]
+        else:
+            kept_classes = sorted(OfficeHome.CLASSES)[:keep_num]
     elif dataset_class == VisDA2017:
-        kept_classes = sorted(VisDA2017.CLASSES)[:6]
+        if keep_num == 0:
+            kept_classes = sorted(VisDA2017.CLASSES)[:6]
+        else:
+            kept_classes = sorted(VisDA2017.CLASSES)[:keep_num]
+    elif dataset_class == DomainNet:
+        if keep_num == 0:
+            kept_classes = sorted(DomainNet.CLASSES)[:40]
+        else:
+            kept_classes = sorted(DomainNet.CLASSES)[:keep_num]
     elif dataset_class in [ImageNetCaltech, CaltechImageNet]:
         kept_classes = dataset_class.CLASSES
     else:

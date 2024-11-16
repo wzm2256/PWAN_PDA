@@ -51,6 +51,11 @@ args_ps.add_argument('--test_interval', type=int, default=500, help="interval of
 args_ps.add_argument('--skip_first', type=int, default=0, help="")
 
 args_ps.add_argument('--task_list', default='0', type=str)
+args_ps.add_argument('--tcls', type=int, default=0, help='')
+args_ps.add_argument('--sf', type=int, default=0, help='')
+args_ps.add_argument('--warm', type=int, default=0, help='')
+args_ps.add_argument('--WG', type=int, default=0, help='')
+args_ps.add_argument('--leaky', type=float, default=0., help='')
 
 args = args_ps.parse_args()
 
@@ -103,7 +108,8 @@ for s in seed_list:
 		                        '--label_smooth', '--cat_smooth', '--NoRelu', '--normalize',
 		                        '--entropy_w', '--pre_train', '--cot', '--cot_weight',
 		                        '--t_cls', '--t_cls_weight', '--clsw', '--bottle_dim',
-		                        '--test_interval', '--detach_s', '--skip_first'],
+		                        '--test_interval', '--detach_s', '--skip_first', '--tcls',
+		                        '--sf', '--warm', '--WG', '--leaky'],
 			[args.dset, st[0], st[1], args.max_iterations, args.batch_size, args.worker, args.d_leaky,
 			 args.point_mass, args.trade_off, args.d_iter, args.d_norm,
 			 args.d_hidden, args.lr_D, args.d_weight_label, args.cls_weight,
@@ -113,4 +119,5 @@ for s in seed_list:
 			 args.label_smooth, args.cat_smooth, args.NoRelu, args.normalize,
 			 args.entropy_w, args.pre_train, args.cot, args.cot_weight,
 			 args.t_cls, args.t_cls_weight, args.clsw, args.bottle_dim,
-			 args.test_interval, args.detach_s, args.skip_first])
+			 args.test_interval, args.detach_s, args.skip_first, args.tcls,
+			 args.sf, args.warm, args.WG, args.leaky])
