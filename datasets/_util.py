@@ -21,13 +21,13 @@ def download(root: str, file_name: str, archive_name: str, url_link: str):
         print("Downloading {}".format(file_name))
         # if os.path.exists(os.path.join(root, archive_name)):
         #     os.remove(os.path.join(root, archive_name))
-        try:
-            download_and_extract_archive(url_link, download_root=root, filename=archive_name, remove_finished=False)
-        except Exception:
-            print("Fail to download {} from url link {}".format(archive_name, url_link))
-            print('Please check you internet connection or '
-                  "reinstall DALIB by 'pip install --upgrade dalib'")
-            exit(0)
+        # try:
+        download_and_extract_archive(url_link, download_root=root, filename=archive_name, remove_finished=False)
+        # except Exception:
+        #     print("Fail to download {} from url link {}".format(archive_name, url_link))
+        #     print('Please check you internet connection or '
+        #           "reinstall DALIB by 'pip install --upgrade dalib'")
+        #     exit(0)
 
 
 def check_exits(root: str, file_name: str):
