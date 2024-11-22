@@ -1,9 +1,5 @@
-import copy
-# import argparse
-import os.path
 import pdb
 
-# import pdb
 
 from torchvision import transforms
 from models import network
@@ -17,7 +13,6 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import datasets.partial as datasets
 from datasets.partial import default_partial as partial_dataset
-# from torch.optim.lr_scheduler import LambdaLR
 import torch.backends.cudnn as cudnn
 
 
@@ -205,9 +200,6 @@ def train(args):
 
                 visualize(cor_s, cor_t, source_label, target_label, source_norm, target_norm, source_logit, target_logit,
                           color_label=args.color_label, logpath=args.Log_path, name=i)
-                # visualize(source_feature, target_feature, source_label, target_label, source_norm, target_norm,
-                #                       color_label=args.color_label, logpath=args.Log_path, name=i)
-                # print("Saving t-SNE to", tSNE_filename)    torch.sum(torch.max(target_logit,1)[1] == target_label) / 1675
 
             if i == args.max_iterations:
                 exit(0)
