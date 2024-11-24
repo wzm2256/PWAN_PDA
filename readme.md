@@ -159,7 +159,7 @@ For any question, welcome to open an issue or contact me.
 
 ### Acknowledgement
 The `datasets` module was adopted from the [Transfer Learning Library](https://github.com/thuml/Transfer-Learning-Library).
-We thank the authors of this repository and other authors in the community for open source their code.
+We thank the authors of this repository and other authors in the community for their code.
 
 
 ### LICENSE
