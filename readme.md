@@ -51,14 +51,14 @@ Gray points represent outlier features.
 #### Data perparation
 
 1. **OfficeHome**
-   1. download the dataset from the [official website](https://www.hemanthdv.org/officeHomeDataset.html) to `data/OfficeHome`
-   2. rename the folder of ``real world``  to `Real_World` 
+   1. Download the dataset from the [official website](https://www.hemanthdv.org/officeHomeDataset.html) to `data/OfficeHome`
+   2. Rename the folder of ``real world``  to `Real_World` 
 
 2. **ImageNet**: 
    1. Download the ImageNet dataset (`ILSVRC2012_img_train.tar`) from the [official website](https://www.image-net.org/download.php) to `data/ImageNetCaltech`.
    2. Uncompress the ImageNet dataset so that there are a `train/` and a `val/` folder. 
 
-3. **DomainNet**: and **VisDa17** can be downloaded automatically. If the link expires, please also use the official websites.
+3. **DomainNet** and **VisDa17** can be downloaded automatically. If the link expires, please also use the official websites.
 
 
 #### Script
@@ -102,7 +102,7 @@ We report the results with random seed 0,1,2.
 | Avg   |0.784|0.772|0.791|
 
 **VisDa17**: The accuracy ranges from 80 to 92.
-The large variance is due to the ambiguity of `skateboard` and `knife` class.
+The large variance is due to the ambiguity of the `skateboard` and `knife` class.
 Visualization and discussion can be found in the appendix of the paper.
 
 **DomainNet**:
@@ -159,7 +159,7 @@ For any question, welcome to open an issue or contact me.
 
 ### Acknowledgement
 The `datasets` module was adopted from the [Transfer Learning Library](https://github.com/thuml/Transfer-Learning-Library).
-We thank the authors of this repository and other community for open source their code.
+We thank the authors of this repository and other authors in the community for open source their code.
 
 
 ### LICENSE
