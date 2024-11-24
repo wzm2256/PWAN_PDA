@@ -99,14 +99,8 @@ def train(args):
 
     # configure networks
     if "ResNet" in args.net:
-        if args.dset == 'ImageNetCaltech__':
-            # use the original resnet structure to use the pretrained weights
-            params = {"resnet_name": args.net, "use_bottleneck": False, "new_cls": False, 'class_num': args.class_num}
-        else:
-            params = {"resnet_name":args.net, "new_cls":True, "use_bottleneck":True, "bottleneck_dim":args.bottle_dim,
-                      'class_num': args.class_num, 'init_fc':args.init_fc, "NoRelu":args.NoRelu,
-                      # "normalize":args.normalize,
-                      }
+        params = {"resnet_name":args.net, "bottleneck_dim":args.bottle_dim,
+                  'class_num': args.class_num, 'init_fc':args.init_fc, "NoRelu":args.NoRelu}
 
         base_network = network.ResNetFc(**params)
         base_network_aux = network.ResNetFc(**params)
@@ -266,7 +260,7 @@ def train(args):
             potential_r_g = domain_D(cor_s_g)
         potential_f_g = domain_D(cor_t_g)
 
-        transfer_loss = -cal_dloss_inc(potential_r_g, potential_f_g, args.point_mass * args.q ** (i - args.warm))
+        transfer_loss = -cal_dloss_inc(potential_r_g, potential_f_g, args.point_mass * args.q ** i)
         target_ent = Entropy(f_g_xt).mean()
         classifier_loss = my_CrossEntropy(f_g_xs, ys, weight=class_weight.to('cuda')[ys])
 
@@ -369,19 +363,10 @@ if __name__ == "__main__":
 
     args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
-    setting_name = '{}_{}_WO_{}_h_{}_WL_{}_ItD_{}_PM_{}_cls_{}_ent_{}_bs_{}' \
-                   '_r_{}_smo_{}_cats_{}_NoR_{}_norm_{}_Pre_{}_c_{}_cw_{}_clsw_{}_auto_{}_ti{}_skip_{}_inc_{}_init_{}' \
-                   '_G_{}_D_{}_sf_{}_warm_{}_WG_{}_ds_{}_ly_{}_seed_{}'.format(
-        args.dset, args.tcls, args.trade_off, args.d_hidden, args.d_weight_label,
-        args.d_iter, args.point_mass, args.cls_weight, args.entropy,
-        args.batch_size, args.pm_ratio, args.label_smooth, args.cat_smooth,
-        args.NoRelu, args.normalize, args.pre_train, args.cot, args.cot_weight,
-        args.clsw, args.auto_ratio, args.test_interval, args.skip_first,
-        args.mass_inc, args.init_fc, args.opt_G, args.opt_D, args.sf,
-        args.warm, args.WG, args.detach_s, args.leaky, args.seed)
+    setting_name = args.dset
 
     print('---------------')
-    print(f'Settings: {setting_name}')
+    print(f'Dataset: {setting_name} seed {args.seed}')
     print('---------------')
 
     args.Log_path = os.path.join('LOG', setting_name, args.name)
@@ -395,6 +380,6 @@ if __name__ == "__main__":
     tf_log = os.path.join(args.Log_path, '0', 'LOG')
     args.writer = SummaryWriter(tf_log)
 
-    args.q = np.exp(np.log(args.pm_ratio) / (args.max_iterations - args.warm))
+    args.q = np.exp(np.log(args.pm_ratio) / args.max_iterations)
 
     train(args)

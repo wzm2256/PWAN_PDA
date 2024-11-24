@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH -A NAISS2024-22-665 -p alvis
-#SBATCH -N 1 --gpus-per-node=T4:1 --gres=gpuexcl:1 # We're launching 2 nodes with 4 Nvidia T4 GPUs each
-#SBATCH -t 0-08:00:00
+#SBATCH -N 1 --gpus-per-node=V100:1 --gres=gpuexcl:1 # We're launching 2 nodes with 4 Nvidia T4 GPUs each
+#SBATCH -t 0-10:00:00
 
 command="head -n $SLURM_ARRAY_TASK_ID a.txt | tail -1"
 echo $command
