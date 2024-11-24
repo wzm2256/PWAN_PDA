@@ -56,7 +56,7 @@ Gray points represent outlier features.
 
 2. **ImageNet**: 
    1. Download the ImageNet dataset (`ILSVRC2012_img_train.tar`) from the [official website](https://www.image-net.org/download.php) to `data/ImageNetCaltech`.
-   2. Uncompress the ImageNet dataset so that there are a `train/` and a `val/` folder. 
+   2. Uncompress the ImageNet dataset to a `train/` folder. 
 
 3. **DomainNet** and **VisDa17** can be downloaded automatically. If the link expires, please also use the official websites.
 
