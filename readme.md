@@ -8,10 +8,10 @@ I am looking for a machine learning engineer/ machine learning researcher positi
 # Partial Distribution Matching via Partial Wasserstein Adversarial Networks
 
 
-This is the official implement of the partial domain adaptation method proposed in [Partial Distribution Matching via
+This is the official implement of the PWAN model introduced in [Partial Distribution Matching via
 Partial Wasserstein Adversarial Networks](https://arxiv.org/abs/2409.10499). 
 This repository contains code to reproduce the partial domain adaptation results.
-Also see the application of PWAN to [point set registration](https://github.com/wzm2256/PWAN),
+Also see the application to [point set registration](https://github.com/wzm2256/PWAN),
 and [generative modelling](https://github.com/wzm2256/PWAN_generative).
 
 ### How does it work?
