@@ -1,30 +1,18 @@
 
-
------------------------
-#### Update:
-Version 2 is comming soon! Faster, less parameter tuning, and better performance!
-
------------------------
-
-
-
 -----------------------
 #### Personal update:
 I am looking for a machine learning engineer/ machine learning researcher position in EU. If you know suitable opportunity, please do not hesitate to contact me! My linkedin page: [Ziming Wang](https://www.linkedin.com/in/ziming-wang-50856916a/)
 
 -----------------------
 
-
-
-
 # Partial Distribution Matching via Partial Wasserstein Adversarial Networks
 
 
 This is the official implement of the partial domain adaptation method proposed in [Partial Distribution Matching via
 Partial Wasserstein Adversarial Networks](https://arxiv.org/abs/2409.10499). 
-This approach applies a PWAN model to partial domain adaptation problems.
-Also see the application of PWAN in point set registration in our earlier [work](https://openreview.net/forum?id=2ggNjUisGyr) 
-([Code](https://github.com/wzm2256/PWAN))
+This repository contains code to reproduce the partial domain adaptation results.
+Also see the application of PWAN to [point set registration](https://github.com/wzm2256/PWAN),
+and [generative modelling](https://github.com/wzm2256/PWAN_generative).
 
 ### How does it work?
 A classifier is used to extract features and predict labels,
